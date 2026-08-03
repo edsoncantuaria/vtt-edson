@@ -1,0 +1,10 @@
+{
+  "name": "vtt-edson",
+  "private": true,
+  "scripts": {
+    "dev:web": "pnpm --filter @vtt/web dev",
+    "build:web": "pnpm --filter @vtt/web build",
+    "test:web": "pnpm --filter @vtt/core test"
+  },
+  "packageManager": "pnpm@11.20.0"
+}

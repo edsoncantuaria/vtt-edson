@@ -1,0 +1,117 @@
+.table {
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+}
+
+.table__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border-right: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+  min-height: 0;
+}
+
+.table__meta h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  font-weight: 400;
+}
+
+.table__meta p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.table__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.table__tools button.active {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+
+.table__upload {
+  display: block;
+  text-align: center;
+  padding: 0.7rem;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.table__upload:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.table__error {
+  margin: 0;
+  color: #ffb4b4;
+  font-size: 0.85rem;
+}
+
+.table__chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.75rem;
+}
+
+.table__chat-log {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+}
+
+.msg--roll em {
+  color: #ffd27a;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.table__chat-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+}
+
+.table__canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.table__canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 800px) {
+  .table {
+    grid-template-columns: 1fr;
+    grid-template-rows: 42vh 1fr;
+  }
+
+  .table__sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}

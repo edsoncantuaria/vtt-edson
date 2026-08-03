@@ -1,0 +1,94 @@
+.lobby {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  gap: 1.5rem;
+  padding: 2rem;
+}
+
+.lobby__brand {
+  text-align: center;
+  max-width: 36rem;
+  margin: 0 auto;
+}
+
+.lobby__brand h1 {
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 8vw, 5rem);
+  font-weight: 400;
+  margin: 0.2rem 0 0.5rem;
+  letter-spacing: -0.02em;
+}
+
+.lobby__eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.lobby__tag {
+  color: var(--muted);
+  margin: 0;
+}
+
+.lobby__card {
+  width: min(420px, 100%);
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: grid;
+  gap: 0.75rem;
+  backdrop-filter: blur(8px);
+}
+
+.lobby__card h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.6rem;
+}
+
+.lobby__card label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.lobby__tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.lobby__tabs button.active {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+
+.lobby__grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  width: min(900px, 100%);
+}
+
+.lobby__error {
+  color: #ffb4b4;
+  background: color-mix(in srgb, var(--danger) 25%, transparent);
+  border: 1px solid var(--danger);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  width: min(640px, 100%);
+  margin: 0 auto;
+}
+
+.lobby__hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
