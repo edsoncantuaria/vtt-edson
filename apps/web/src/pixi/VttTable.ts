@@ -57,7 +57,7 @@ export class VttTable {
     await this.app.init({
       width,
       height,
-      background: '#0e0c0a',
+      background: '#0d2818',
       antialias: true,
       resolution: Math.min(window.devicePixelRatio || 1, 2),
       autoDensity: true,
@@ -154,7 +154,12 @@ export class VttTable {
     const size = state.grid.size
     const w = this.bgSprite?.width || 2000
     const h = this.bgSprite?.height || 1400
-    g.setStrokeStyle({ width: 1, color: 0xffffff, alpha: 0.12 })
+
+    if (!this.bgSprite) {
+      g.rect(0, 0, w, h).fill({ color: 0x1b4332 })
+    }
+
+    g.setStrokeStyle({ width: 1, color: 0xe8d4b0, alpha: 0.14 })
     for (let x = state.grid.offsetX; x <= w; x += size) {
       g.moveTo(x, 0)
       g.lineTo(x, h)
@@ -170,13 +175,13 @@ export class VttTable {
     const g = this.wallLayer
     g.clear()
     for (const wall of state.walls) {
-      g.setStrokeStyle({ width: 4, color: 0xd9c3a0 })
+      g.setStrokeStyle({ width: 5, color: 0xe8d4b0, alpha: 0.95 })
       g.moveTo(wall.x1, wall.y1)
       g.lineTo(wall.x2, wall.y2)
       g.stroke()
     }
     for (const door of state.doors) {
-      g.setStrokeStyle({ width: 5, color: door.open ? 0x3d7a5c : 0xc45c26 })
+      g.setStrokeStyle({ width: 6, color: door.open ? 0x52b788 : 0xb8953c })
       g.moveTo(door.x1, door.y1)
       g.lineTo(door.x2, door.y2)
       g.stroke()
@@ -194,16 +199,28 @@ export class VttTable {
       c.cursor = 'pointer'
       ;(c as Container & { tokenId?: string }).tokenId = token.id
 
+      const radius = (cell * (token.size || 1)) / 2 - 4
       const circle = new Graphics()
-        .circle(0, 0, (cell * (token.size || 1)) / 2 - 4)
-        .fill({ color: 0xc45c26 })
-        .stroke({ width: 2, color: 0xf2e8d5 })
+        .circle(0, 0, radius)
+        .fill({ color: 0x9b2c3c })
+        .stroke({ width: 3, color: 0xd4b45a })
       c.addChild(circle)
       const label = new Text({
         text: token.name,
-        style: new TextStyle({ fill: 0xf2e8d5, fontSize: 12, fontFamily: 'DM Sans' }),
+        style: new TextStyle({
+          fill: 0xe8d4b0,
+          fontSize: 13,
+          fontFamily: 'Outfit',
+          fontWeight: '600',
+          dropShadow: {
+            color: 0x081910,
+            blur: 2,
+            distance: 1,
+            angle: Math.PI / 4,
+          },
+        }),
       })
-      label.anchor.set(0.5, -1.2)
+      label.anchor.set(0.5, -1.15)
       c.addChild(label)
       this.tokenLayer.addChild(c)
     }
@@ -216,16 +233,15 @@ export class VttTable {
     const h = this.bgSprite?.height || 1400
 
     if (this.role === 'gm') {
-      fog.rect(0, 0, w, h).fill({ color: 0x000000, alpha: 0.35 })
+      fog.rect(0, 0, w, h).fill({ color: 0x081910, alpha: 0.4 })
       for (const r of state.fog.revealed) {
         fog.rect(r.x, r.y, r.w, r.h).cut()
       }
     } else {
-      fog.rect(0, 0, w, h).fill({ color: 0x000000, alpha: 1 })
+      fog.rect(0, 0, w, h).fill({ color: 0x081910, alpha: 1 })
       for (const r of state.fog.revealed) {
         fog.rect(r.x, r.y, r.w, r.h).cut()
       }
-      // light holes: soft cutouts for players
       for (const light of state.lights) {
         fog.circle(light.x, light.y, light.radius).cut()
       }
@@ -234,8 +250,8 @@ export class VttTable {
     const lights = this.lightMask
     lights.clear()
     for (const light of state.lights) {
-      lights.circle(light.x, light.y, light.radius).fill({ color: 0xffe6a0, alpha: 0.12 })
-      lights.circle(light.x, light.y, 6).fill({ color: 0xffcc66, alpha: 0.8 })
+      lights.circle(light.x, light.y, light.radius).fill({ color: 0xffe6a0, alpha: 0.14 })
+      lights.circle(light.x, light.y, 7).fill({ color: 0xd4b45a, alpha: 0.9 })
     }
   }
 
@@ -321,9 +337,9 @@ export class VttTable {
           const y = Math.min(this.draftStart.y, p.y)
           const w = Math.abs(p.x - this.draftStart.x)
           const h = Math.abs(p.y - this.draftStart.y)
-          this.draft.rect(x, y, w, h).fill({ color: 0x3d7a5c, alpha: 0.25 })
+          this.draft.rect(x, y, w, h).fill({ color: 0x52b788, alpha: 0.28 })
         } else {
-          this.draft.setStrokeStyle({ width: 3, color: 0x7ec8a0 })
+          this.draft.setStrokeStyle({ width: 3, color: 0xd4b45a })
           this.draft.moveTo(this.draftStart.x, this.draftStart.y)
           this.draft.lineTo(p.x, p.y)
           this.draft.stroke()

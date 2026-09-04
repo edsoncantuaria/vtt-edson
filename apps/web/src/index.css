@@ -1,18 +1,26 @@
 :root {
-  --bg: #1a1612;
-  --bg-elev: #241f19;
-  --ink: #f2e8d5;
-  --muted: #a89984;
-  --accent: #c45c26;
-  --accent-2: #3d7a5c;
-  --line: #3a3228;
-  --danger: #b33a3a;
-  --font-ui: "DM Sans", system-ui, sans-serif;
-  --font-display: "Instrument Serif", Georgia, serif;
+  /* Mesa de feltro + ripa de madeira */
+  --felt: #1b4332;
+  --felt-deep: #0d2818;
+  --felt-mid: #2d6a4f;
+  --wood: #c9a66b;
+  --wood-light: #e8d4b0;
+  --wood-dark: #7a5634;
+  --ink: #1c140c;
+  --ink-soft: #3a2a1c;
+  --muted: #6e5640;
+  --brass: #b8953c;
+  --brass-hot: #d4b45a;
+  --line: color-mix(in srgb, var(--wood-dark) 45%, transparent);
+  --danger: #9b2c3c;
+  --roll: #1b5e3b;
+  --shadow: 0 12px 40px rgba(8, 28, 21, 0.35);
+  --font-ui: "Outfit", system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
   color: var(--ink);
-  background: var(--bg);
+  background: var(--felt-deep);
   font-family: var(--font-ui);
-  line-height: 1.4;
+  line-height: 1.45;
   font-weight: 400;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -33,9 +41,10 @@ body,
 
 body {
   background:
-    radial-gradient(1200px 600px at 10% -10%, #3a2a1c 0%, transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, #1f2e28 0%, transparent 50%),
-    var(--bg);
+    radial-gradient(ellipse 900px 500px at 15% -5%, color-mix(in srgb, var(--felt-mid) 55%, transparent), transparent 60%),
+    radial-gradient(ellipse 700px 420px at 95% 10%, color-mix(in srgb, var(--wood-dark) 28%, transparent), transparent 55%),
+    linear-gradient(165deg, var(--felt) 0%, var(--felt-deep) 55%, #081910 100%);
+  background-attachment: fixed;
 }
 
 button,
@@ -45,34 +54,63 @@ input {
 
 button {
   cursor: pointer;
-  border: 1px solid var(--line);
-  background: var(--bg-elev);
+  border: 1px solid color-mix(in srgb, var(--wood-dark) 35%, transparent);
+  background: linear-gradient(180deg, var(--wood-light), var(--wood));
   color: var(--ink);
-  border-radius: 6px;
-  padding: 0.55rem 0.9rem;
+  border-radius: 8px;
+  padding: 0.55rem 0.95rem;
+  font-weight: 500;
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff 35%, transparent) inset;
+  transition: transform 120ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+  filter: brightness(0.97);
 }
 
 button.primary {
-  background: var(--accent);
-  border-color: transparent;
-  color: #fff8f0;
+  background: linear-gradient(180deg, var(--brass-hot), var(--brass));
+  border-color: color-mix(in srgb, var(--ink) 20%, transparent);
+  color: var(--ink);
   font-weight: 600;
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
+  transform: none;
 }
 
 input {
   width: 100%;
-  border: 1px solid var(--line);
-  background: #120f0c;
+  border: 1px solid color-mix(in srgb, var(--wood-dark) 40%, transparent);
+  background: color-mix(in srgb, var(--wood-light) 70%, #fff);
   color: var(--ink);
-  border-radius: 6px;
-  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  padding: 0.65rem 0.8rem;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+input:focus {
+  border-color: var(--felt-mid);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--felt-mid) 25%, transparent);
 }
 
 a {
-  color: var(--accent);
+  color: var(--felt-mid);
+}
+
+code {
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 0.92em;
+  background: color-mix(in srgb, var(--felt) 12%, transparent);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
 }

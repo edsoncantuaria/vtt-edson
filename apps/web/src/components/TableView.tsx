@@ -232,7 +232,9 @@ export function TableView() {
           </form>
         </div>
       </aside>
-      <div className="table__canvas" ref={hostRef} />
+      <div className="table__stage">
+        <div className="table__canvas" ref={hostRef} />
+      </div>
     </div>
   )
 }
