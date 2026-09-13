@@ -1,0 +1,166 @@
+.compendium {
+  padding: 18px;
+}
+.compendium > .search-field {
+  margin: 15px 0;
+}
+.edition-note {
+  font-size: 10px;
+  color: #bfb5a1;
+  line-height: 1.7;
+  padding: 12px;
+  background: #2c2b23;
+  border: 1px solid #524a37;
+  border-radius: 8px;
+  display: flex;
+  gap: 9px;
+  margin-bottom: 17px;
+}
+.edition-note svg {
+  margin-top: 3px;
+  color: var(--gold);
+}
+.compendium-target {
+  font-size: 10px;
+}
+.compendium-target select {
+  padding: 8px;
+  font-size: 11px;
+}
+.compendium-results {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--ink-faint);
+  margin: 20px 0 10px;
+}
+.compendium-results small {
+  font-size: 8px;
+}
+.compendium-entry {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  margin-bottom: 9px;
+  overflow: hidden;
+}
+.compendium-entry__head {
+  background: transparent;
+  width: 100%;
+  border: 0;
+  padding: 13px 11px;
+  justify-content: flex-start;
+  text-align: left;
+  gap: 10px;
+}
+.entry-icon {
+  background: #302f28;
+  border: 1px solid #524f3f;
+  border-radius: 8px;
+  width: 37px;
+  height: 39px;
+  display: grid;
+  place-items: center;
+  color: var(--gold);
+}
+.compendium-entry__head > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.compendium-entry b {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+}
+.compendium-entry__head small {
+  display: block;
+  font-size: 9px;
+  color: var(--ink-faint);
+  margin-top: 4px;
+}
+.compendium-entry__head[aria-expanded="true"] {
+  background: #282e2c;
+}
+.compendium-entry__head[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+.compendium-detail {
+  padding: 15px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.compendium-detail dl {
+  margin: 0;
+}
+.compendium-detail dl > div {
+  margin-bottom: 12px;
+}
+.compendium-detail dt {
+  font-size: 10px;
+  color: var(--gold);
+}
+.compendium-detail dd {
+  margin: 1px 0 0;
+  white-space: pre-wrap;
+}
+.compendium-detail ul {
+  padding-left: 16px;
+  margin: 3px 0;
+}
+.compendium-detail li {
+  margin-bottom: 7px;
+}
+.compendium-detail button {
+  font-size: 11px;
+  width: 100%;
+  margin-top: 10px;
+}
+.compendium-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #23362c;
+  border: 1px solid #4d7860;
+  border-radius: 8px;
+  font-size: 11px;
+  color: #b4d5bc;
+  margin-top: 15px;
+}
+.compendium-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+.compendium-pagination span {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.catalog-filters {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.catalog-filters select {min-height:44px;font-size:12px;max-width:100%}
+.catalog-prose {white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8;font-size:13px;max-width:75ch}
+.catalog-origin {font-size:11px;color:var(--gold);margin-bottom:14px}
+.compendium-detail details {padding:14px 0;font-size:12px}
+.compendium-detail summary {cursor:pointer}
+
+.five-tools-table { overflow-x: auto; max-width: 100%; margin-block: 1rem; }
+.five-tools-table table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+.five-tools-table th, .five-tools-table td { padding: .65rem; border: 1px solid var(--border, #514737); text-align: left; vertical-align: top; }
+.five-tools-table caption { text-align: left; font-weight: 700; padding-block: .5rem; }
+.five-tools-table p { margin: 0; }
+.catalog-prose section { margin-block: 1rem; }
+.catalog-prose h4 { margin-block: 1.5rem .5rem; }
+.five-tools-inset { border: 1px solid var(--border, #514737); padding: 1rem; }
+.catalog-prose { overflow-wrap: anywhere; }
+.monster-stat-block { line-height: 1.6; }
+.monster-stat-block h4 { border-bottom: 1px solid var(--border, #514737); padding-bottom: .4rem; margin-top: 1.5rem; }
+.monster-stat-block dl { display: grid; grid-template-columns: auto 1fr; gap: .25rem 1rem; }
+.monster-stat-block dd { margin: 0; }
+
+.catalog-thumbnail { width: 40px; height: 40px; object-fit: contain; }
+.catalog-art { display: block; max-width: 100%; max-height: 320px; margin-inline: auto; object-fit: contain; }
+.catalog-figure { margin: 0 0 1rem; }
+.catalog-figure figcaption { font-size: .8rem; text-align: center; margin-top: .5rem; }

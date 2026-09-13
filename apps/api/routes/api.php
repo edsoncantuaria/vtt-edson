@@ -1,32 +1,133 @@
 <?php
 
+use App\Http\Controllers\Api\ActorController;
+use App\Http\Controllers\Api\AdventureImportController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CampaignExportController;
+use App\Http\Controllers\Api\CampaignImportController;
+use App\Http\Controllers\Api\CampaignSceneController;
+use App\Http\Controllers\Api\CatalogController;
+use App\Http\Controllers\Api\CatalogMediaController;
+use App\Http\Controllers\Api\CombatController;
+use App\Http\Controllers\Api\CompendiumController;
+use App\Http\Controllers\Api\DamageController;
+use App\Http\Controllers\Api\EncounterBuilderController;
+use App\Http\Controllers\Api\HomebrewController;
+use App\Http\Controllers\Api\HouseRuleController;
+use App\Http\Controllers\Api\JournalController;
+use App\Http\Controllers\Api\LootController;
+use App\Http\Controllers\Api\PlaylistController;
+use App\Http\Controllers\Api\PrivateMessageController;
+use App\Http\Controllers\Api\RollTableController;
 use App\Http\Controllers\Api\RoomController;
+use App\Http\Controllers\Api\SceneActionController;
+use App\Http\Controllers\Api\SceneChatController;
 use App\Http\Controllers\Api\SceneController;
+use App\Http\Controllers\Api\SceneGeometryController;
+use App\Http\Controllers\Api\SceneTokenController;
+use App\Http\Middleware\SerializeSceneWrites;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/catalog-media/{entry}/{variant}', [CatalogMediaController::class, 'show'])->middleware('throttle:60,1');
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
 Broadcast::routes(['middleware' => ['auth:sanctum']]);
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', SerializeSceneWrites::class])->group(function () {
+    Route::get('/campaigns/{campaign}/export', [CampaignExportController::class, 'show']);
+    Route::post('/campaigns/import', [CampaignImportController::class, 'store']);
+    Route::get('/campaigns/{campaign}/house-rules', [HouseRuleController::class, 'show']);
+    Route::put('/campaigns/{campaign}/house-rules', [HouseRuleController::class, 'update']);
+    Route::put('/campaigns/{campaign}/catalog/{entry}/share', [CatalogController::class, 'share']);
+    Route::get('/campaigns/{campaign}/catalog-sources', [CatalogController::class, 'sources']);
+    Route::put('/campaigns/{campaign}/catalog-sources', [CatalogController::class, 'updateSources']);
+    Route::get('/campaigns/{campaign}/adventures/{entry}/preview', [AdventureImportController::class, 'preview']);
+    Route::post('/campaigns/{campaign}/adventures/{entry}/import', [AdventureImportController::class, 'store']);
+    Route::get('/catalog/{kind}', [CatalogController::class, 'index']);
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
+    Route::get('/rooms', [RoomController::class, 'index']);
     Route::post('/rooms', [RoomController::class, 'create']);
     Route::post('/rooms/join', [RoomController::class, 'join']);
+    Route::get('/campaigns/{campaign}/scenes', [CampaignSceneController::class, 'index']);
+    Route::post('/campaigns/{campaign}/scenes', [CampaignSceneController::class, 'store']);
+    Route::patch('/scenes/{scene}', [CampaignSceneController::class, 'update']);
+    Route::get('/campaigns/{campaign}/journals', [JournalController::class, 'index']);
+    Route::post('/campaigns/{campaign}/journals', [JournalController::class, 'store']);
+    Route::patch('/journals/{journal}', [JournalController::class, 'update']);
+    Route::delete('/journals/{journal}', [JournalController::class, 'destroy']);
+    Route::get('/campaigns/{campaign}/playlists', [PlaylistController::class, 'index']);
+    Route::post('/campaigns/{campaign}/playlists', [PlaylistController::class, 'store']);
+    Route::patch('/playlists/{playlist}', [PlaylistController::class, 'update']);
+    Route::delete('/playlists/{playlist}', [PlaylistController::class, 'destroy']);
+    Route::post('/playlists/{playlist}/tracks', [PlaylistController::class, 'addTrack']);
+    Route::delete('/playlist-tracks/{track}', [PlaylistController::class, 'deleteTrack']);
+    Route::get('/campaigns/{campaign}/homebrew', [HomebrewController::class, 'index']);
+    Route::post('/campaigns/{campaign}/homebrew', [HomebrewController::class, 'store']);
+    Route::patch('/homebrew/{homebrewPackage}', [HomebrewController::class, 'update']);
+    Route::post('/homebrew/{homebrewPackage}/entries', [HomebrewController::class, 'storeEntry']);
+    Route::patch('/homebrew-entries/{homebrewEntry}', [HomebrewController::class, 'updateEntry']);
+    Route::delete('/homebrew-entries/{homebrewEntry}', [HomebrewController::class, 'destroyEntry']);
+    Route::get('/campaigns/{campaign}/encounter-drafts', [EncounterBuilderController::class, 'index']);
+    Route::post('/campaigns/{campaign}/encounter-drafts', [EncounterBuilderController::class, 'store']);
+    Route::patch('/encounter-drafts/{encounterBuilderDraft}', [EncounterBuilderController::class, 'update']);
+    Route::post('/encounter-drafts/{encounterBuilderDraft}/instantiate', [EncounterBuilderController::class, 'instantiate']);
+    Route::delete('/encounter-drafts/{encounterBuilderDraft}', [EncounterBuilderController::class, 'destroy']);
+    Route::get('/campaigns/{campaign}/roll-tables', [RollTableController::class, 'index']);
+    Route::post('/campaigns/{campaign}/roll-tables', [RollTableController::class, 'store']);
+    Route::patch('/roll-tables/{rollTable}', [RollTableController::class, 'update']);
+    Route::post('/roll-tables/{rollTable}/roll', [RollTableController::class, 'roll']);
+    Route::delete('/roll-tables/{rollTable}', [RollTableController::class, 'destroy']);
+    Route::get('/campaigns/{campaign}/loot', [LootController::class, 'index']);
+    Route::post('/campaigns/{campaign}/loot', [LootController::class, 'store']);
+    Route::post('/loot/{lootResult}/apply', [LootController::class, 'apply']);
 
     Route::get('/scenes/{scene}', [SceneController::class, 'show']);
     Route::post('/scenes/{scene}/background', [SceneController::class, 'uploadBackground']);
-    Route::post('/scenes/{scene}/tokens', [SceneController::class, 'upsertToken']);
-    Route::delete('/scenes/{scene}/tokens/{tokenId}', [SceneController::class, 'deleteToken']);
-    Route::post('/scenes/{scene}/walls', [SceneController::class, 'upsertWall']);
-    Route::post('/scenes/{scene}/doors', [SceneController::class, 'upsertDoor']);
-    Route::post('/scenes/{scene}/doors/{doorId}/toggle', [SceneController::class, 'toggleDoor']);
-    Route::post('/scenes/{scene}/lights', [SceneController::class, 'upsertLight']);
-    Route::post('/scenes/{scene}/fog', [SceneController::class, 'paintFog']);
-    Route::patch('/scenes/{scene}/grid', [SceneController::class, 'updateGrid']);
-    Route::post('/scenes/{scene}/chat', [SceneController::class, 'chat']);
+    Route::post('/scenes/{scene}/encounters', [SceneTokenController::class, 'prepareEncounter']);
+    Route::post('/scenes/{scene}/tokens', [SceneTokenController::class, 'upsertToken']);
+    Route::delete('/scenes/{scene}/tokens/{tokenId}', [SceneTokenController::class, 'deleteToken']);
+    Route::delete('/scenes/{scene}/geometry/{kind}/{objectId}', [SceneGeometryController::class, 'deleteGeometry']);
+    Route::post('/scenes/{scene}/walls', [SceneGeometryController::class, 'upsertWall']);
+    Route::post('/scenes/{scene}/doors', [SceneGeometryController::class, 'upsertDoor']);
+    Route::post('/scenes/{scene}/doors/{doorId}/toggle', [SceneGeometryController::class, 'toggleDoor']);
+    Route::post('/scenes/{scene}/lights', [SceneGeometryController::class, 'upsertLight']);
+    Route::post('/scenes/{scene}/fog', [SceneGeometryController::class, 'paintFog']);
+    Route::patch('/scenes/{scene}/grid', [SceneGeometryController::class, 'updateGrid']);
+    Route::patch('/scenes/{scene}/vision', [SceneGeometryController::class, 'updateVision']);
+    Route::patch('/scenes/{scene}/audio', [SceneGeometryController::class, 'updateAudio']);
+    Route::post('/scenes/{scene}/chat', [SceneChatController::class, 'store']);
+    Route::get('/scenes/{scene}/private-messages', [PrivateMessageController::class, 'index']);
+    Route::post('/scenes/{scene}/private-messages', [PrivateMessageController::class, 'store']);
+    Route::get('/scenes/{scene}/damage/{messageId}', [DamageController::class, 'show']);
+    Route::post('/scenes/{scene}/damage/{messageId}/save', [DamageController::class, 'save']);
+    Route::post('/scenes/{scene}/damage/{messageId}/concentration', [DamageController::class, 'concentration']);
+    Route::post('/scenes/{scene}/actions/{messageId}/undo', [DamageController::class, 'undoAction']);
+    Route::post('/scenes/{scene}/damage/{messageId}', [DamageController::class, 'store']);
+    Route::get('/scenes/{scene}/actions', [DamageController::class, 'history']);
+    Route::post('/scenes/{scene}/actions', [SceneActionController::class, 'action']);
+
+    Route::get('/campaigns/{campaign}/actors', [ActorController::class, 'index']);
+    Route::post('/campaigns/{campaign}/actors', [ActorController::class, 'store']);
+    Route::get('/actors/{actor}', [ActorController::class, 'show']);
+    Route::post('/actors/{actor}/image', [ActorController::class, 'uploadImage']);
+    Route::patch('/actors/{actor}', [ActorController::class, 'update']);
+    Route::delete('/actors/{actor}', [ActorController::class, 'destroy']);
+    Route::get('/actors/{actor}/export', [ActorController::class, 'export']);
+
+    Route::get('/compendium/{kind}', [CompendiumController::class, 'index']);
+    Route::get('/compendium/{kind}/{slug}', [CompendiumController::class, 'show']);
+
+    Route::get('/scenes/{scene}/combat', [CombatController::class, 'show']);
+    Route::post('/scenes/{scene}/combat/start', [CombatController::class, 'start']);
+    Route::post('/scenes/{scene}/combat/end', [CombatController::class, 'end']);
+    Route::post('/scenes/{scene}/combat/roll-initiative', [CombatController::class, 'rollInitiative']);
+    Route::post('/scenes/{scene}/combat/next', [CombatController::class, 'next']);
+    Route::post('/scenes/{scene}/combat/prev', [CombatController::class, 'prev']);
+    Route::post('/scenes/{scene}/combat/combatants', [CombatController::class, 'addCombatant']);
+    Route::delete('/scenes/{scene}/combat/combatants/{participant}', [CombatController::class, 'removeCombatant']);
 });

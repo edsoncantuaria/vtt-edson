@@ -4,7 +4,7 @@
   "scripts": {
     "dev:web": "pnpm --filter @vtt/web dev",
     "build:web": "pnpm --filter @vtt/web build",
-    "test:web": "pnpm --filter @vtt/core test"
+    "test:web": "pnpm --filter @vtt/core test && pnpm --filter @vtt/web test"
   },
   "packageManager": "pnpm@11.20.0"
 }

@@ -24,3 +24,10 @@ apps/api/.phpunit.result.cache
 
 apps/web/dist/
 apps/api/storage/app/public/
+
+.scratch/
+.agents/
+.claude/
+.codex/
+.impeccable
+skills-lock.json

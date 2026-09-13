@@ -6,10 +6,11 @@ use App\Models\Scene;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class SceneUpdated implements ShouldBroadcastNow
+class SceneUpdated implements ShouldBroadcastNow, ShouldDispatchAfterCommit
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
@@ -30,14 +31,6 @@ class SceneUpdated implements ShouldBroadcastNow
 
     public function broadcastWith(): array
     {
-        return [
-            'sceneId' => $this->scene->id,
-            'reason' => $this->reason,
-            'state' => $this->scene->state,
-            'backgroundUrl' => $this->scene->background_path
-                ? url('storage/'.$this->scene->background_path)
-                : null,
-            'name' => $this->scene->name,
-        ];
+        return ['sceneId' => $this->scene->id, 'reason' => $this->reason];
     }
 }

@@ -1,124 +1,537 @@
-.lobby {
-  min-height: 100%;
+.auth-page {
+  min-height: 100dvh;
   display: grid;
-  place-content: center;
-  gap: 1.75rem;
-  padding: 2rem;
-  animation: lobby-in 520ms ease both;
+  grid-template-columns: 1.3fr 1fr;
 }
-
-@keyframes lobby-in {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+.auth-story {
+  min-height: 100dvh;
+  padding: 44px 54px 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background:
+    linear-gradient(180deg, #0d151b44 0%, #0b141a22 20%, #080e14d9 100%),
+    url("/adventure-citadel-gemini.jpeg") 58% center / cover;
 }
-
-.lobby__brand {
-  text-align: center;
-  max-width: 38rem;
+.auth-story__copy {
+  margin-top: auto;
+  padding-top: 180px;
+}
+.auth-story h1 {
+  font-family: var(--font-display);
+  font-size: clamp(30px, 3.2vw, 48px);
+  line-height: 1.35;
+  margin: 18px 0;
+  color: #f2eee5;
+}
+.auth-story p {
+  color: #c4ccce;
+  max-width: 370px;
+  line-height: 1.8;
+}
+.auth-story__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  padding-top: 28px;
+  font-size: 11px;
+  color: #d9d9cd;
+}
+.auth-story__tags span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.auth-story__tags svg {
+  color: var(--gold);
+}
+.auth-story .auth-story__foot {
+  font-size: 10px;
+  margin-top: 70px;
+  color: #a1abae;
+  max-width: none;
+}
+.auth-form-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--mat);
+  padding: 50px;
+  position: relative;
+}
+.auth-form {
+  width: 100%;
+  max-width: 355px;
+  display: grid;
+  gap: 22px;
+}
+.auth-form h2 {
+  font-size: 28px;
+  line-height: 1.25;
+  margin-top: -7px;
+}
+.auth-form > p:first-of-type {
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin-top: -10px;
+}
+.auth-form input {
+  padding: 13px;
+}
+.auth-form__submit {
+  margin-top: 3px;
+  padding: 13px;
+  justify-content: space-between;
+}
+.auth-form .auth-form__note {
+  font-size: 11px;
+  color: var(--ink-faint);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+.auth-footer {
+  position: absolute;
+  bottom: 30px;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+.library {
+  min-height: 100dvh;
+  background: var(--mat);
+  overflow-x: hidden;
+}
+.library__header {
+  height: 88px;
+  display: flex;
+  align-items: center;
+  gap: 70px;
+  padding: 0 5%;
+  border-bottom: 1px solid var(--border);
+}
+.library__nav {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--gold);
+  height: 100%;
+  border-bottom: 2px solid var(--gold);
+  font-size: 12px;
+}
+.account {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+.account small {
+  display: block;
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+.library__main {
+  max-width: 1340px;
+  padding: 34px 5% 0;
   margin: 0 auto;
 }
-
-.lobby__brand h1 {
-  font-family: var(--font-display);
-  font-size: clamp(3.2rem, 9vw, 5.4rem);
-  font-weight: 700;
-  font-optical-sizing: auto;
-  margin: 0.15rem 0 0.55rem;
-  letter-spacing: -0.03em;
-  color: var(--wood-light);
-  text-shadow: 0 2px 0 color-mix(in srgb, var(--felt-deep) 60%, transparent);
-}
-
-.lobby__eyebrow {
-  text-transform: uppercase;
-  letter-spacing: 0.22em;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--brass-hot);
-  margin: 0;
-}
-
-.lobby__tag {
-  color: color-mix(in srgb, var(--wood-light) 78%, transparent);
-  margin: 0;
-  font-size: 1.05rem;
-}
-
-.lobby__card {
-  width: min(420px, 100%);
+.library-hero {
+  min-height: 300px;
+  border: 1px solid #515751;
+  border-radius: 16px;
+  overflow: hidden;
+  padding: 36px 40px;
   background:
-    linear-gradient(165deg, color-mix(in srgb, var(--wood-light) 92%, #fff), var(--wood));
-  border: 1px solid color-mix(in srgb, var(--wood-dark) 40%, transparent);
-  border-radius: 14px;
-  padding: 1.35rem;
-  display: grid;
-  gap: 0.8rem;
-  box-shadow: var(--shadow), 0 1px 0 color-mix(in srgb, #fff 45%, transparent) inset;
+    linear-gradient(90deg, #101b21f5 4%, #101b21bb 43%, #101b2100 80%),
+    url("/adventure-citadel-gemini.jpeg") center 42% / cover;
 }
-
-.lobby__card h2 {
-  margin: 0;
+.library-hero h1 {
   font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 1.75rem;
-  color: var(--ink);
+  font-size: clamp(28px, 3vw, 39px);
+  line-height: 1.35;
+  margin: 14px 0 12px;
 }
-
-.lobby__card label {
-  display: grid;
-  gap: 0.35rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--muted);
-  letter-spacing: 0.02em;
+.library-hero p {
+  color: #b7c2c3;
+  font-size: 12px;
+  margin-bottom: 25px;
 }
-
-.lobby__tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.4rem;
-  padding: 0.25rem;
-  background: color-mix(in srgb, var(--felt-deep) 10%, transparent);
-  border-radius: 10px;
-}
-
-.lobby__tabs button {
+.hero-join {
   background: transparent;
   border-color: transparent;
-  box-shadow: none;
+  margin-left: 12px;
+  font-size: 12px;
 }
-
-.lobby__tabs button.active {
-  background: linear-gradient(180deg, var(--felt-mid), var(--felt));
-  color: var(--wood-light);
-  border-color: transparent;
+.library__collection {
+  padding-top: 38px;
 }
-
-.lobby__grid {
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.section-heading h2 {
+  font-size: 23px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.count {
+  font: 11px var(--font-mono);
+  color: var(--ink-muted);
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.section-heading p {
+  color: var(--ink-faint);
+  font-size: 12px;
+  margin-top: 7px;
+}
+.section-heading .search-field {
+  width: 245px;
+}
+.library__filters {
+  display: flex;
+  gap: 22px;
+  margin: 22px 0 24px;
+  border-bottom: 1px solid var(--border);
+}
+.library__filters button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 12px 0;
+  font-size: 12px;
+  color: var(--ink-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.library__filters button[aria-pressed="true"] {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+.library__filters button span {
+  color: var(--ink-faint);
+  font: 10px var(--font-mono);
+}
+.room-grid {
   display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  width: min(900px, 100%);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+}
+.room-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--mat-raised);
+  transition: border-color 150ms;
+}
+.room-card:hover {
+  border-color: #76654a;
+}
+.room-card__art {
+  height: 152px;
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  padding: 14px;
+  display: flex;
+  align-items: flex-start;
+}
+.room-card__art::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(transparent, #0b1218bb);
+}
+.room-card__edition {
+  position: absolute;
+  bottom: 12px;
+  left: 15px;
+  font-size: 10px;
+  color: #deddd1;
+}
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #c4dbd3;
+  background: #152b27ed;
+  border: 1px solid #668c7888;
+  border-radius: 5px;
+  font-size: 10px;
+  padding: 4px 7px;
+  z-index: 1;
+}
+.role-badge--gm {
+  color: var(--gold-hot);
+  background: #302a1ee8;
+  border-color: #9f825588;
+}
+.room-card__body {
+  padding: 18px;
+}
+.room-card__body h3 {
+  font-size: 19px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.room-card__body p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  margin-top: 8px;
+  color: var(--ink-faint);
+}
+.room-card__group {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-muted);
+  font-size: 10px;
+  margin: 22px 0 15px;
+}
+.room-card__group span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.room-card__open {
+  width: 100%;
+  justify-content: space-between;
+  background: #252b2c;
+  color: var(--gold-hot);
+  font-size: 12px;
+}
+.room-card__backup {
+  width: 100%;
+  margin-top: 9px;
+  justify-content: center;
+  gap: 7px;
+  background: transparent;
+  color: var(--ink-muted);
+  border-color: var(--border);
+  font-size: 11px;
+}
+.room-card__backup:hover:not(:disabled) {
+  color: var(--gold-hot);
+  border-color: #76654a;
+}
+.library-empty {
+  text-align: center;
+  padding: 26px 20px 35px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+}
+.library-empty h3 {
+  font-size: 21px;
+  margin: 18px 0 8px;
+}
+.library-empty p {
+  color: var(--ink-faint);
+  font-size: 12px;
+  margin-bottom: 20px;
+}
+.library-empty button {
+  font-size: 12px;
+}
+.room-skeleton {
+  height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: linear-gradient(125deg, var(--mat-panel), var(--mat-raised));
+}
+.library__footer {
+  padding: 28px 0;
+  margin-top: 30px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+.library__footer svg {
+  color: var(--gold);
+}
+.library__footer span:last-child {
+  margin-left: auto;
+}
+.room-form {
+  padding: 24px;
+  display: grid;
+  gap: 22px;
+}
+.room-form > p {
+  font-size: 13px;
+  color: var(--ink-muted);
+  line-height: 1.7;
+}
+.room-code-input {
+  font: 25px var(--font-mono);
+  letter-spacing: 8px;
+  text-align: center;
+  padding: 20px;
+}
+@media (min-width: 1600px) {
+  .auth-story {
+    padding: 60px 80px;
+  }
+}
+@media (max-width: 1000px) {
+  .auth-page {
+    grid-template-columns: 1fr 1fr;
+  }
+  .auth-story {
+    padding: 32px;
+  }
+  .auth-form-area {
+    padding: 32px;
+  }
+  .room-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .auth-page {
+    display: block;
+  }
+  .auth-story {
+    min-height: 310px;
+    padding: calc(24px + env(safe-area-inset-top)) 20px 24px;
+    background-position: center 40%;
+  }
+  .auth-story__copy {
+    padding-top: 36px;
+  }
+  .auth-story h1 {
+    font-size: 26px;
+    margin-bottom: 0;
+  }
+  .auth-story__copy > p,
+  .auth-story__tags,
+  .auth-story .auth-story__foot {
+    display: none;
+  }
+  .auth-story .eyebrow {
+    font-size: 8px;
+  }
+  .auth-form-area {
+    padding: 35px 20px calc(70px + env(safe-area-inset-bottom));
+  }
+  .auth-form h2 {
+    font-size: 24px;
+  }
+  .auth-footer {
+    bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+  .library__header {
+    padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+    min-height: calc(76px + env(safe-area-inset-top));
+    height: auto;
+    gap: 10px;
+  }
+  .library__nav,
+  .account > span:not(.avatar) {
+    display: none;
+  }
+  .brand {
+    font-size: 17px;
+  }
+  .library__main {
+    padding: 20px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+  }
+  .library-hero {
+    padding: 26px 20px;
+    min-height: 295px;
+    background-position: 57% center;
+  }
+  .library-hero .eyebrow {
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+  .library-hero h1 {
+    font-size: 27px;
+  }
+  .hero-join {
+    margin-left: 0;
+    padding: 10px 12px;
+    display: inline-flex;
+    margin-top: 10px;
+    min-height: 44px;
+  }
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .section-heading .search-field {
+    width: 100%;
+  }
+  .library__filters {
+    gap: 18px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+  .library__filters button {
+    font-size: 11px;
+    flex: 0 0 auto;
+    min-height: 44px;
+  }
+  .room-grid {
+    grid-template-columns: 1fr;
+  }
+  .library__footer span:last-child {
+    display: none;
+  }
+  .library__footer {
+    padding-bottom: calc(28px + env(safe-area-inset-bottom));
+  }
+  .room-form {
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+    gap: 16px;
+  }
+  .room-code-input {
+    font-size: 22px;
+    letter-spacing: 5px;
+    padding-inline: 10px;
+  }
+  .room-card__group {
+    flex-wrap: wrap;
+  }
 }
 
-.lobby__error {
-  color: #5c1420;
-  background: color-mix(in srgb, var(--danger) 18%, var(--wood-light));
-  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
-  padding: 0.75rem 1rem;
-  border-radius: 10px;
-  width: min(640px, 100%);
-  margin: 0 auto;
-}
-
-.lobby__hint {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--muted);
+@media (max-width: 430px) {
+  .brand {
+    min-width: 0;
+  }
+  .brand > span:last-child {
+    min-width: 0;
+  }
+  .brand small {
+    letter-spacing: 1.3px;
+  }
+  .account {
+    gap: 6px;
+  }
+  .library-hero {
+    min-height: 0;
+  }
+  .library-hero h1 {
+    font-size: 24px;
+  }
+  .library-hero .primary,
+  .hero-join {
+    width: 100%;
+    justify-content: center;
+  }
+  .section-heading h2 {
+    font-size: 20px;
+    flex-wrap: wrap;
+  }
 }

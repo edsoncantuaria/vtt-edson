@@ -1,240 +1,400 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { SceneState } from '@vtt/core'
-import { isValidDiceFormula } from '@vtt/core'
-import { api } from '../lib/api'
-import { createEcho } from '../lib/echo'
-import { VttTable } from '../pixi/VttTable'
-import { useSession, type Tool } from '../store/session'
-import './TableView.css'
-
-const TOOLS: { id: Tool; label: string; gmOnly?: boolean }[] = [
-  { id: 'select', label: 'Selecionar' },
-  { id: 'pan', label: 'Pan' },
-  { id: 'token', label: 'Token', gmOnly: true },
-  { id: 'wall', label: 'Parede', gmOnly: true },
-  { id: 'door', label: 'Porta', gmOnly: true },
-  { id: 'light', label: 'Luz', gmOnly: true },
-  { id: 'fog', label: 'Fog', gmOnly: true },
-]
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSession, type Panel, type SceneSummary } from "../store/session";
+import { updateScene } from "../lib/scene";
+import { useSceneSync } from "../lib/useSceneSync";
+import { Icon } from "./Icon";
+import { DiceTray } from "./DiceTray";
+import { AmbiencePlayer } from "./AmbiencePlayer";
+import { api } from "../lib/api";
+import { HelpDialog, InviteDialog } from "./table-view/TableDialogs";
+import { TableFooter } from "./table-view/TableFooter";
+import { TableHeader } from "./table-view/TableHeader";
+import { SessionPanel } from "./table-view/SessionPanel";
+import { TABLE_TOOLS } from "./table-view/tableViewConfig";
+import { ToolRail } from "./table-view/ToolRail";
+import { useVttTable } from "./table-view/useVttTable";
+import "./TableView.css";
 
 export function TableView() {
   const {
     sceneId,
     sceneName,
+    campaignName,
+    campaignId,
     roomCode,
     role,
     state,
     backgroundUrl,
     tool,
+    panel,
+    actors,
     user,
+    ruleset,
+    combat,
     setTool,
-    patchState,
+    setPanel,
+    setSelectedActorId,
     setError,
+    enterScene,
     error,
-  } = useSession()
-  const hostRef = useRef<HTMLDivElement>(null)
-  const tableRef = useRef<VttTable | null>(null)
-  const toolRef = useRef(tool)
-  const [chatText, setChatText] = useState('')
-  const [uploading, setUploading] = useState(false)
-
-  toolRef.current = tool
-
-  const tools = useMemo(
-    () => TOOLS.filter((t) => !t.gmOnly || role === 'gm'),
-    [role],
-  )
-
+  } = useSession();
+  const upload = useRef<HTMLInputElement>(null);
+  const [diceOpen, setDiceOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [tokenActor, setTokenActor] = useState("");
+  const [scenes, setScenes] = useState<SceneSummary[]>([]);
+  const connection = useSceneSync();
+  const gm = role === "gm";
+  const availableTools = useMemo(() => TABLE_TOOLS.filter((item) => !item.gm || gm), [gm]);
+  const activeTool = TABLE_TOOLS.find((item) => item.id === tool)!;
+  const report = useCallback(
+    (e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível concluir a ação."),
+    [setError],
+  );
   useEffect(() => {
-    if (!hostRef.current || !sceneId || !role) return
-
-    let cancelled = false
-    let echo: ReturnType<typeof createEcho> | null = null
-    const host = hostRef.current
-    const table = new VttTable({
-      host,
-      role,
-      getTool: () => toolRef.current,
-      callbacks: {
-        onTokenMove: (id, x, y) => {
-          void api(`/scenes/${sceneId}/tokens`, {
-            method: 'POST',
-            body: JSON.stringify({ id, x, y }),
-          }).catch((e) => setError(e.message))
-        },
-        onTokenCreate: (x, y) => {
-          void api(`/scenes/${sceneId}/tokens`, {
-            method: 'POST',
-            body: JSON.stringify({ x, y, name: 'Token', ownerUserId: user?.id }),
-          }).catch((e) => setError(e.message))
-        },
-        onWallCreate: (x1, y1, x2, y2) => {
-          void api(`/scenes/${sceneId}/walls`, {
-            method: 'POST',
-            body: JSON.stringify({ x1, y1, x2, y2 }),
-          }).catch((e) => setError(e.message))
-        },
-        onDoorCreate: (x1, y1, x2, y2) => {
-          void api(`/scenes/${sceneId}/doors`, {
-            method: 'POST',
-            body: JSON.stringify({ x1, y1, x2, y2, open: false }),
-          }).catch((e) => setError(e.message))
-        },
-        onLightCreate: (x, y) => {
-          void api(`/scenes/${sceneId}/lights`, {
-            method: 'POST',
-            body: JSON.stringify({ x, y, radius: 180 }),
-          }).catch((e) => setError(e.message))
-        },
-        onFogPaint: (x, y, w, h) => {
-          void api(`/scenes/${sceneId}/fog`, {
-            method: 'POST',
-            body: JSON.stringify({ x, y, w, h, mode: 'reveal' }),
-          }).catch((e) => setError(e.message))
-        },
-      },
-    })
-
-    void (async () => {
+    if (!campaignId) return;
+    const controller = new AbortController();
+    let pending = false;
+    async function refreshScenes() {
+      if (pending || controller.signal.aborted) return;
+      pending = true;
       try {
-        await table.init()
-        if (cancelled || !table.ready) return
-
-        tableRef.current = table
-        const snap = useSession.getState()
-        await table.render(snap.state, snap.backgroundUrl)
-
-        echo = createEcho()
-        echo
-          .private(`scene.${sceneId}`)
-          .listen('.SceneUpdated', (payload: { state: SceneState; backgroundUrl?: string | null }) => {
-            patchState(payload.state, payload.backgroundUrl)
-          })
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Falha ao iniciar a mesa')
-        }
+        const result = await api<{ scenes: SceneSummary[] }>(`/campaigns/${campaignId}/scenes`, {
+          signal: controller.signal,
+        });
+        if (!controller.signal.aborted) setScenes(result.scenes);
+      } catch (error) {
+        if (!controller.signal.aborted) report(error);
+      } finally {
+        pending = false;
       }
-    })()
-
+    }
+    void refreshScenes();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshScenes();
+    }, 15000);
     return () => {
-      cancelled = true
-      echo?.leave(`scene.${sceneId}`)
-      table.destroy()
-      if (tableRef.current === table) tableRef.current = null
-      host.replaceChildren()
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [campaignId, report]);
+  async function switchScene(id: number) {
+    try {
+      const result = await api<{ scene: SceneSummary }>(`/scenes/${id}`);
+      enterScene(result.scene);
+    } catch (error) {
+      report(error);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneId, role])
-
+  }
+  function choosePanel(next: Panel) {
+    setPanel(next);
+    setPanelOpen(true);
+  }
+  const { host, table, zoom, selectedTokenIds, lastTemplate, preparing, effect, dismissEffect } =
+    useVttTable({
+      sceneId,
+      role,
+      userId: user?.id,
+      tokenActorId: tokenActor,
+      report,
+      onActorPanelOpen: useCallback(() => setPanelOpen(true), []),
+    });
   useEffect(() => {
-    const table = tableRef.current
-    if (!table?.ready) return
-    table.setRole(role ?? 'player')
-    void table.render(state, backgroundUrl)
-  }, [state, backgroundUrl, role])
-
-  async function onUpload(file: File | null) {
-    if (!file || !sceneId) return
-    setUploading(true)
-    setError(null)
-    try {
-      const fd = new FormData()
-      fd.append('background', file)
-      const res = await api<{ state: SceneState; backgroundUrl: string }>(
-        `/scenes/${sceneId}/background`,
-        { method: 'POST', formData: fd },
+    const key = (e: KeyboardEvent) => {
+      if (
+        (e.target as HTMLElement).closest("input,textarea,select,[contenteditable],dialog") ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey
       )
-      patchState(res.state, res.backgroundUrl)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Falha no upload')
-    } finally {
-      setUploading(false)
+        return;
+      const selected = availableTools.find((t) => t.key.toLowerCase() === e.key.toLowerCase());
+      if (selected) {
+        e.preventDefault();
+        setTool(selected.id);
+      }
+      if (e.key === "Escape") {
+        setDiceOpen(false);
+        setTool("select");
+      }
+      if (e.key === "?") setHelpOpen(true);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [availableTools, setTool]);
+  async function uploadMap(file: File | undefined) {
+    if (!file || !sceneId) return;
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Escolha um mapa de até 10 MB.");
+      return;
     }
-  }
-
-  async function sendChat(e: FormEvent) {
-    e.preventDefault()
-    if (!sceneId || !chatText.trim()) return
-    const text = chatText.trim()
-    if (text.toLowerCase().startsWith('/roll ') && !isValidDiceFormula(text.slice(6))) {
-      setError('Fórmula inválida. Use NdM±K, ex: 2d6+3')
-      return
-    }
-    setChatText('')
+    setUploading(true);
     try {
-      await api(`/scenes/${sceneId}/chat`, {
-        method: 'POST',
-        body: JSON.stringify({ text }),
-      })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Falha no chat')
+      const data = new FormData();
+      data.append("background", file);
+      await updateScene(sceneId, "/background", data);
+    } catch (e) {
+      report(e);
+    } finally {
+      setUploading(false);
     }
   }
-
+  const ownActor = actors.find((a) => a.type === "character" && a.ownerUserId === user?.id);
+  const activeTurn = combat?.participants[combat.turn];
   return (
-    <div className="table">
-      <aside className="table__sidebar">
-        <div className="table__meta">
-          <h1>{sceneName}</h1>
-          <p>
-            Código <strong>{roomCode}</strong> · {role === 'gm' ? 'Mestre' : 'Jogador'} · {user?.name}
-          </p>
-        </div>
-
-        <div className="table__tools">
-          {tools.map((t) => (
-            <button key={t.id} className={tool === t.id ? 'active' : ''} onClick={() => setTool(t.id)}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {role === 'gm' && (
-          <label className="table__upload">
-            {uploading ? 'Enviando mapa…' : 'Upload do mapa'}
-            <input
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
-            />
-          </label>
-        )}
-
-        {error && <p className="table__error">{error}</p>}
-
-        <div className="table__chat">
-          <div className="table__chat-log">
-            {state.chat.map((m) => (
-              <div key={m.id} className={`msg msg--${m.type}`}>
-                <strong>{m.userName}</strong>
-                {m.type === 'roll' ? (
-                  <span>
-                    {' '}
-                    rolou <code>{m.formula}</code> → <em>{m.total}</em> ({m.detail})
-                  </span>
-                ) : (
-                  <span> {m.text}</span>
+    <main className={"table " + (!panelOpen ? "table--focus" : "")}>
+      <TableHeader
+        campaignName={campaignName}
+        ruleset={ruleset}
+        sceneName={sceneName}
+        connection={connection}
+        gm={gm}
+        userName={user?.name ?? ""}
+        onHome={() => {
+          location.hash = "";
+          useSession.getState().leaveScene();
+        }}
+        onInvite={() => {
+          setCopied(false);
+          setInviteOpen(true);
+        }}
+      />
+      <div className="table-workspace">
+        <ToolRail
+          tools={availableTools}
+          activeTool={tool}
+          gm={gm}
+          onTool={setTool}
+          onScene={() => choosePanel("scene")}
+          onHelp={() => setHelpOpen(true)}
+        />
+        <section className="table-stage" aria-label="Mapa da sessão">
+          <div
+            className="table-canvas"
+            ref={host}
+            role="img"
+            aria-label="Mapa tático interativo. Use o painel Cena para gerenciar tokens ou as ferramentas para navegar."
+          />
+          <div className="stage-top">
+            <div className="scene-chip">
+              <Icon name="map" size={17} />
+              <label className="sr-only" htmlFor="scene-switcher">
+                Cena ativa
+              </label>
+              <select
+                id="scene-switcher"
+                value={sceneId ?? ""}
+                onChange={(event) => void switchScene(Number(event.target.value))}
+              >
+                {(scenes.length ? scenes : sceneId ? [{ id: sceneId, name: sceneName }] : []).map(
+                  (scene) => (
+                    <option value={scene.id} key={scene.id}>
+                      {scene.name}
+                    </option>
+                  ),
                 )}
-              </div>
-            ))}
-          </div>
-          <form onSubmit={sendChat} className="table__chat-form">
-            <input
-              value={chatText}
-              onChange={(e) => setChatText(e.target.value)}
-              placeholder="Mensagem ou /roll 2d6+3"
-            />
-            <button className="primary" type="submit">
-              Enviar
+              </select>
+              <small>{gm ? "VISÃO DO MESTRE" : "EXPLORAÇÃO"}</small>
+            </div>
+            <button
+              className="focus-button icon-button"
+              onClick={() => setPanelOpen(!panelOpen)}
+              aria-label={panelOpen ? "Recolher painel lateral" : "Abrir painel lateral"}
+              title="Alternar painel"
+            >
+              <Icon name={panelOpen ? "chevron" : "book"} size={18} />
             </button>
-          </form>
-        </div>
-      </aside>
-      <div className="table__stage">
-        <div className="table__canvas" ref={hostRef} />
+          </div>
+          {combat && (
+            <button className="turn-banner" onClick={() => choosePanel("combat")}>
+              <Icon name="swords" size={17} />
+              <span>RODADA {combat.round}</span>
+              <strong>{activeTurn ? "Turno de " + activeTurn.name : "Adicione combatentes"}</strong>
+              <Icon name="chevron" size={16} />
+            </button>
+          )}
+          {preparing && (
+            <div className="stage-loading" role="status">
+              Preparando o mapa…
+            </div>
+          )}
+          {!preparing && !backgroundUrl && state.tokens.length === 0 && tool === "select" && (
+            <div className="stage-welcome">
+              <span className="empty-symbol">
+                <Icon name="map" size={34} />
+              </span>
+              <h2>{gm ? "Dê vida ao seu mundo." : "A aventura está prestes a começar."}</h2>
+              <p>
+                {gm
+                  ? "Adicione um mapa, prepare os personagens e convide seu grupo. A mesa é sua."
+                  : "Prepare sua ficha enquanto o mestre organiza a cena."}
+              </p>
+              {gm ? (
+                <button
+                  className="primary"
+                  disabled={uploading}
+                  onClick={() => upload.current?.click()}
+                >
+                  <Icon name="upload" size={17} />
+                  {uploading ? "Enviando…" : "Adicionar mapa"}
+                </button>
+              ) : (
+                <button className="primary" onClick={() => choosePanel("actors")}>
+                  <Icon name="shield" size={17} />
+                  Minha ficha
+                </button>
+              )}
+              <small>
+                {gm
+                  ? "JPG, PNG ou WebP · até 10 MB"
+                  : "As áreas aparecem conforme o mestre as revela."}
+              </small>
+            </div>
+          )}
+          {tool === "token" && gm && (
+            <div className="token-picker">
+              <label>
+                Colocar no mapa
+                <select value={tokenActor} onChange={(e) => setTokenActor(e.target.value)}>
+                  <option value="">Token sem ficha</option>
+                  {actors.map((a) => (
+                    <option value={a.id} key={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+          {error && (
+            <div className="table-error notice notice--error" role="alert">
+              <span>{error}</span>
+              <button
+                className="icon-button"
+                aria-label="Dispensar erro"
+                onClick={() => setError(null)}
+              >
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+          )}
+          <div className="stage-bottom">
+            <div className="zoom-control">
+              <button
+                className="icon-button"
+                onClick={() => table.current?.zoom(0.8)}
+                aria-label="Diminuir zoom"
+              >
+                <Icon name="minus" size={16} />
+              </button>
+              <span>{Math.round(zoom * 100)}%</span>
+              <button
+                className="icon-button"
+                onClick={() => table.current?.zoom(1.25)}
+                aria-label="Aumentar zoom"
+              >
+                <Icon name="plus" size={16} />
+              </button>
+              <button
+                className="icon-button"
+                onClick={() => table.current?.fit()}
+                aria-label="Enquadrar mapa"
+                title="Enquadrar mapa"
+              >
+                <Icon name="fit" size={16} />
+              </button>
+            </div>
+            <span className="grid-info">
+              <Icon name="grid" size={14} />
+              {state.grid.size}px · {state.grid.snap ? "Encaixe ativo" : "Movimento livre"}
+            </span>
+            {selectedTokenIds.length > 0 && (
+              <span className="grid-info">
+                <Icon name="users" size={14} />
+                {selectedTokenIds.length} {selectedTokenIds.length === 1 ? "alvo" : "alvos"}
+                {lastTemplate ? ` · ${Math.round(lastTemplate.distanceFeet * 10) / 10} ft` : ""}
+              </span>
+            )}
+          </div>
+          {diceOpen && (
+            <div className="dice-popover">
+              <button
+                className="icon-button dice-close"
+                aria-label="Fechar dados"
+                onClick={() => setDiceOpen(false)}
+              >
+                <Icon name="close" size={17} />
+              </button>
+              <DiceTray />
+            </div>
+          )}
+          {effect && (
+            <div className="action-effect" role="status" aria-label={effect.label}>
+              <img src={effect.url} alt={effect.label} onError={dismissEffect} />
+              <span>{effect.label}</span>
+              <button className="icon-button" onClick={dismissEffect} aria-label="Fechar efeito">
+                <Icon name="close" size={17} />
+              </button>
+            </div>
+          )}
+          <AmbiencePlayer />
+        </section>
+        {panelOpen && (
+          <SessionPanel
+            panel={panel}
+            gm={gm}
+            actorCount={actors.length}
+            combat={combat}
+            uploading={uploading}
+            scenes={scenes}
+            onPanel={choosePanel}
+            onUpload={() => upload.current?.click()}
+            center={() => table.current?.centerPoint() ?? { x: 350, y: 350 }}
+            onScenesChange={setScenes}
+            onSceneChange={switchScene}
+          />
+        )}
       </div>
-    </div>
-  )
+      <TableFooter
+        userName={user?.name ?? ""}
+        gm={gm}
+        ownActorName={ownActor?.name}
+        activeTool={activeTool}
+        diceOpen={diceOpen}
+        onOwnActor={() => {
+          if (ownActor) setSelectedActorId(ownActor.id);
+        }}
+        onPanel={choosePanel}
+        onDice={() => setDiceOpen((open) => !open)}
+      />
+      <input
+        ref={upload}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        hidden
+        onChange={(e) => {
+          void uploadMap(e.target.files?.[0]);
+          e.target.value = "";
+        }}
+      />
+      {inviteOpen && (
+        <InviteDialog
+          roomCode={roomCode}
+          copied={copied}
+          onClose={() => setInviteOpen(false)}
+          onCopy={() => {
+            void navigator.clipboard
+              .writeText(roomCode ?? "")
+              .then(() => setCopied(true))
+              .catch(() => setError("Não foi possível copiar. Selecione o código acima."));
+          }}
+        />
+      )}
+      {helpOpen && <HelpDialog gm={gm} tools={availableTools} onClose={() => setHelpOpen(false)} />}
+    </main>
+  );
 }

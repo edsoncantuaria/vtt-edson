@@ -21,6 +21,8 @@ final class SceneStateFactory
             'walls' => [],
             'doors' => [],
             'lights' => [],
+            'vision' => ['dynamic' => false, 'darkness' => false, 'normalVisionFeet' => 60],
+            'audio' => ['url' => null, 'volume' => 0.5, 'loop' => true],
             'fog' => ['revealed' => []],
             'chat' => [],
         ];

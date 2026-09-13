@@ -14,7 +14,7 @@ Broadcast::channel('scene.{sceneId}', function ($user, int $sceneId) {
     }
 
     $member = $scene->memberFor($user);
-    if (! $member) {
+    if (! $member || (! $member->isGm() && ! $scene->published)) {
         return false;
     }
 
