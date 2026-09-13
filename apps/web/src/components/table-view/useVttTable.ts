@@ -1,6 +1,14 @@
 import type { AreaTemplate, Role } from "@vtt/core";
 import { useEffect, useRef, useState } from "react";
 import { updateScene } from "../../lib/scene";
+import { pluginRegistry } from "../../lib/plugins";
+import {
+  canvasObject,
+  canvasPayload,
+  translateCanvasObject,
+  type CanvasObjectKind,
+  type CanvasSelection,
+} from "../../lib/canvasObjects";
 import { VttTable } from "../../pixi/VttTable";
 import { useSession } from "../../store/session";
 
@@ -11,6 +19,7 @@ export function useVttTable({
   role,
   userId,
   tokenActorId,
+  canEditScene,
   report,
   onActorPanelOpen,
 }: {
@@ -18,6 +27,7 @@ export function useVttTable({
   role: Role | null;
   userId: number | undefined;
   tokenActorId: string;
+  canEditScene: boolean;
   report: ReportError;
   onActorPanelOpen: () => void;
 }) {
@@ -38,11 +48,13 @@ export function useVttTable({
   const [lastTemplate, setLastTemplate] = useState<AreaTemplate | null>(null);
   const [preparing, setPreparing] = useState(true);
   const [effect, setEffect] = useState<{ url: string; label: string } | null>(null);
+  const [selectedCanvasObject, setSelectedCanvasObject] = useState<CanvasSelection | null>(null);
 
   useEffect(() => {
     if (!host.current || !sceneId || !role || !userId) return;
 
     setSelectedTokenIds([]);
+    setSelectedCanvasObject(null);
     setLastTemplate(null);
     setPreparing(true);
     let active = true;
@@ -52,6 +64,7 @@ export function useVttTable({
       userId,
       getTool: () => useSession.getState().tool,
       getActors: () => useSession.getState().actors,
+      canEditScene,
       callbacks: {
         onZoom: (nextZoom) => {
           if (active) setZoom(nextZoom);
@@ -78,11 +91,13 @@ export function useVttTable({
           setMapTargets(template.actorIds);
         },
         onTokenMove: (tokenId, x, y) => {
-          void updateScene(sceneId, "/tokens", { id: tokenId, x, y }).catch((error) => {
-            report(error);
-            const current = useSession.getState();
-            if (active) void instance.render(current.state, current.backgroundUrl).catch(report);
-          });
+          void updateScene(sceneId, "/tokens", { id: tokenId, x, y })
+            .then(() => pluginRegistry.hooks.emit("token:moved", { sceneId, tokenId, x, y }))
+            .catch((error) => {
+              report(error);
+              const current = useSession.getState();
+              if (active) void instance.render(current.state, current.backgroundUrl).catch(report);
+            });
         },
         onTokenCreate: (x, y) => {
           const current = useSession.getState();
@@ -106,6 +121,40 @@ export function useVttTable({
         },
         onFogPaint: (x, y, w, h) => {
           void updateScene(sceneId, "/fog", { x, y, w, h, mode: "reveal" }).catch(report);
+        },
+        onDrawingCreate: (points) => {
+          void updateScene(sceneId, "/canvas/drawings", { kind: "freehand", points }).catch(report);
+        },
+        onLabelCreate: (x, y) => {
+          const text = window.prompt("Texto do rótulo");
+          if (!text?.trim()) return;
+          void updateScene(sceneId, "/canvas/labels", { x, y, text: text.trim() }).catch(report);
+        },
+        onPing: (x, y) => {
+          void updateScene(sceneId, "/canvas/pings", { x, y }).catch(report);
+        },
+        onRegionCreate: (x, y, w, h) => {
+          const name = window.prompt("Nome da região", "Região");
+          if (!name?.trim()) return;
+          void updateScene(sceneId, "/canvas/regions", {
+            x,
+            y,
+            w,
+            h,
+            name: name.trim(),
+            behavior: "none",
+          }).catch(report);
+        },
+        onCanvasSelect: (kind, id) => {
+          if (!active) return;
+          setSelectedCanvasObject(kind && id ? { kind, id } : null);
+        },
+        onCanvasMove: (kind: CanvasObjectKind, id, dx, dy) => {
+          const current = useSession.getState().state;
+          const object = canvasObject(current, { kind, id });
+          if (!object) return;
+          const moved = translateCanvasObject(kind, object, dx, dy);
+          void updateScene(sceneId, `/canvas/${kind}`, canvasPayload(kind, moved)).catch(report);
         },
       },
     });
@@ -136,6 +185,7 @@ export function useVttTable({
     sceneId,
     role,
     userId,
+    canEditScene,
     setMapTargets,
     setPanel,
     setSelectedActorId,
@@ -163,6 +213,8 @@ export function useVttTable({
     lastTemplate,
     preparing,
     effect,
+    selectedCanvasObject,
+    selectCanvasObject: setSelectedCanvasObject,
     dismissEffect: () => setEffect(null),
   };
 }

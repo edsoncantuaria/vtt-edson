@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ABILITY_LABELS, type Actor, type ChatMessage } from "@vtt/core";
 import { api } from "../lib/api";
-import { useSession } from "../store/session";
+import { isManagerRole, useSession } from "../store/session";
 
 type SaveResult = {
   success: boolean;
@@ -63,7 +63,7 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
   const [status, setStatus] = useState("");
   const [opened, setOpened] = useState(false);
   const [targetConfirmed, setTargetConfirmed] = useState(false);
-  const editable = actors.filter((a) => role === "gm" || a.ownerUserId === user?.id);
+  const editable = actors.filter((a) => isManagerRole(role) || a.ownerUserId === user?.id);
   const mapTargets = targetActorIds
     .map((id) => editable.find((actor) => actor.id === id))
     .filter((actor): actor is Actor => !!actor);
@@ -208,7 +208,7 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
             {result.save ? (
               <>
                 <SaveOutcome result={result.save} />
-                {role === "gm" && !applied && (
+                {isManagerRole(role) && !applied && (
                   <details>
                     <summary>Substituir resultado por decisão do mestre</summary>
                     <label>
@@ -272,7 +272,7 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
                       placeholder="Ex.: Resistência Lendária"
                     />
                   </label>
-                  {role === "gm" && (
+                  {isManagerRole(role) && (
                     <button
                       disabled={disabled || !!applied || !reason.trim()}
                       onClick={() =>

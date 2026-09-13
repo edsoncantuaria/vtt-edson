@@ -1,4 +1,4 @@
-import type { RoomSummary } from "../../store/session";
+import { isManagerRole, type RoomSummary } from "../../store/session";
 import { Icon } from "../Icon";
 
 export function RoomCard({
@@ -22,9 +22,15 @@ export function RoomCard({
           backgroundImage: `url("${room.backgroundUrl ?? "/adventure-citadel-gemini.jpeg"}")`,
         }}
       >
-        <span className={`role-badge ${room.role === "gm" ? "role-badge--gm" : ""}`}>
-          <Icon name={room.role === "gm" ? "shield" : "users"} size={14} />
-          {room.role === "gm" ? "Mestre" : "Jogador"}
+        <span className={`role-badge ${isManagerRole(room.role) ? "role-badge--gm" : ""}`}>
+          <Icon name={isManagerRole(room.role) ? "shield" : "users"} size={14} />
+          {room.role === "assistant"
+            ? "Assistente"
+            : room.role === "observer"
+              ? "Observador"
+              : isManagerRole(room.role)
+                ? "Mestre"
+                : "Jogador"}
         </span>
         <span className="room-card__edition">
           D&D 5e · {room.ruleset === "5e-2024" ? "2024" : "2014"}
@@ -46,7 +52,7 @@ export function RoomCard({
         <button className="room-card__open" disabled={busy} onClick={() => onOpen(room)}>
           Abrir mesa <Icon name="arrow" size={18} />
         </button>
-        {room.role === "gm" && (
+        {isManagerRole(room.role) && (
           <button
             className="room-card__backup"
             disabled={busy}

@@ -16,6 +16,11 @@ export type CatalogKind =
   | "bastions"
   | "vehicles"
   | "decks"
+  | "cards"
+  | "encounters"
+  | "loot"
+  | "magic-variants"
+  | "legendary-groups"
   | "recipes"
   | "psionics"
   | "rewards"
@@ -70,6 +75,11 @@ export type FiveToolsRaw = Record<string, unknown> & {
 
 export type CatalogData = Record<string, unknown> & {
   raw: FiveToolsRaw;
+  integration?: {
+    schema: number;
+    sourceKey: string;
+    automation: Record<string, unknown>;
+  };
   description?: string;
   desc?: unknown;
   challenge_rating?: unknown;
@@ -152,6 +162,11 @@ export const CATALOG_KINDS: { id: CatalogKind; label: string; optional?: boolean
   { id: "bastions", label: "Bastiões", optional: true },
   { id: "vehicles", label: "Veículos", optional: true },
   { id: "decks", label: "Baralhos", optional: true },
+  { id: "cards", label: "Cartas", optional: true },
+  { id: "encounters", label: "Encontros prontos", optional: true },
+  { id: "loot", label: "Tesouro", optional: true },
+  { id: "magic-variants", label: "Variantes mágicas", optional: true },
+  { id: "legendary-groups", label: "Covis e efeitos regionais", optional: true },
   { id: "recipes", label: "Receitas", optional: true },
   { id: "psionics", label: "Psiônicos", optional: true },
   { id: "rewards", label: "Recompensas", optional: true },

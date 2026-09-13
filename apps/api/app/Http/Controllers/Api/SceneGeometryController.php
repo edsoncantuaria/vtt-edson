@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Events\SceneUpdated;
 use App\Http\Controllers\Concerns\AuthorizesScene;
 use App\Http\Controllers\Controller;
+use App\Models\CampaignAsset;
 use App\Models\Scene;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,7 +18,7 @@ final class SceneGeometryController extends Controller
 
     public function deleteGeometry(Request $request, Scene $scene, string $kind, string $objectId): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         abort_unless(in_array($kind, ['walls', 'doors', 'lights']), 404);
 
         return DB::transaction(function () use ($scene, $kind, $objectId) {
@@ -35,7 +36,7 @@ final class SceneGeometryController extends Controller
 
     public function upsertWall(Request $request, Scene $scene): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $data = $request->validate([
             'id' => ['nullable', 'string', 'max:64'],
             'x1' => ['required', 'numeric'],
@@ -68,7 +69,7 @@ final class SceneGeometryController extends Controller
 
     public function upsertDoor(Request $request, Scene $scene): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $data = $request->validate([
             'id' => ['nullable', 'string', 'max:64'],
             'x1' => ['required', 'numeric'],
@@ -112,7 +113,7 @@ final class SceneGeometryController extends Controller
 
     public function toggleDoor(Request $request, Scene $scene, string $doorId): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $state = $scene->state;
         $idx = collect($state['doors'])->search(fn ($d) => $d['id'] === $doorId);
         if ($idx === false) {
@@ -131,7 +132,7 @@ final class SceneGeometryController extends Controller
 
     public function upsertLight(Request $request, Scene $scene): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $data = $request->validate([
             'id' => ['nullable', 'string', 'max:64'],
             'x' => ['required', 'numeric'],
@@ -162,7 +163,7 @@ final class SceneGeometryController extends Controller
 
     public function paintFog(Request $request, Scene $scene): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $data = $request->validate([
             'x' => ['required', 'numeric'],
             'y' => ['required', 'numeric'],
@@ -202,7 +203,7 @@ final class SceneGeometryController extends Controller
 
     public function updateGrid(Request $request, Scene $scene): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $data = $request->validate([
             'size' => ['nullable', 'numeric', 'min:8'],
             'offsetX' => ['nullable', 'numeric'],
@@ -220,7 +221,7 @@ final class SceneGeometryController extends Controller
 
     public function updateVision(Request $request, Scene $scene): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $data = $request->validate([
             'dynamic' => ['required', 'boolean'],
             'darkness' => ['sometimes', 'boolean'],
@@ -241,14 +242,21 @@ final class SceneGeometryController extends Controller
 
     public function updateAudio(Request $request, Scene $scene): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $data = $request->validate([
             'url' => ['nullable', 'url', 'max:2000', 'regex:/^https:\/\//i'],
+            'assetId' => ['nullable', 'integer', 'exists:campaign_assets,id'],
             'volume' => ['nullable', 'numeric', 'min:0', 'max:1'],
             'loop' => ['nullable', 'boolean'],
         ]);
         $state = $scene->state;
         $audio = $state['audio'] ?? ['url' => null, 'volume' => 0.5, 'loop' => true];
+        if (isset($data['assetId'])) {
+            $asset = CampaignAsset::findOrFail($data['assetId']);
+            abort_unless((int) $asset->campaign_id === (int) $scene->campaign_id && $asset->kind === 'audio', 422, 'Escolha um áudio desta campanha.');
+            $data['url'] = url('storage/'.$asset->path);
+            unset($data['assetId']);
+        }
         $state['audio'] = array_merge($audio, array_filter($data, fn ($value) => $value !== null));
         $scene->state = $state;
         $scene->save();

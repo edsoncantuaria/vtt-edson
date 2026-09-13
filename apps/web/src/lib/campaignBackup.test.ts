@@ -6,11 +6,11 @@ describe("campaign backup helpers", () => {
     const archive = parseCampaignBackup(
       JSON.stringify({
         format: "vtt-edson-campaign",
-        version: 2,
+        version: 3,
         campaign: { name: "Teste" },
       }),
     );
-    expect(archive.version).toBe(2);
+    expect(archive.version).toBe(3);
   });
 
   it("returns friendly errors for malformed or incompatible files", () => {

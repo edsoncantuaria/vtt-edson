@@ -72,6 +72,6 @@ class PlaylistController extends Controller
 
     private function gm(Request $request, Campaign $campaign): void
     {
-        abort_unless($campaign->roleFor($request->user()) === 'gm', 403);
+        abort_unless($campaign->canManage($request->user()), 403);
     }
 }

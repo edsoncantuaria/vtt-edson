@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { useSession } from "../store/session";
+import { isManagerRole, useSession } from "../store/session";
 
 type Entry = { min: number; max: number; label: string; result?: Record<string, unknown> };
-type Table = { id: number; name: string; formula: string; enabled: boolean; entries: Entry[] };
-type RollResult = { record: { id: number }; roll: { total: number; detail: string }; entry: Entry };
+type Table = {
+  id: number;
+  name: string;
+  formula: string;
+  enabled: boolean;
+  entries: Entry[];
+  metadata?: Record<string, unknown>;
+};
+type RollResult = {
+  record: { id: number };
+  roll: { total: number; detail: string };
+  entry: Entry;
+  loot?: { id: number; name: string };
+  encounterDraft?: { id: number; name: string };
+};
 
 export function RollTableManager({
   onLootResult,
@@ -45,8 +58,15 @@ export function RollTableManager({
   async function roll(table: Table) {
     try {
       const result = await api<RollResult>(`/roll-tables/${table.id}/roll`, { method: "POST" });
-      setMessage(`${table.name}: ${result.roll.detail} → ${result.entry.label}`);
-      if (result.entry.result)
+      const materialized = result.encounterDraft
+        ? ` · encontro “${result.encounterDraft.name}” criado`
+        : result.loot
+          ? ` · tesouro “${result.loot.name}” criado`
+          : "";
+      setMessage(`${table.name}: ${result.roll.detail} → ${result.entry.label}${materialized}`);
+      if (result.encounterDraft) window.dispatchEvent(new Event("vtt:encounters-changed"));
+      if (result.loot) window.dispatchEvent(new Event("vtt:loot-changed"));
+      if (!result.loot && !result.encounterDraft && result.entry.result)
         onLootResult?.({
           rollTableRollId: result.record.id,
           name: result.entry.label,
@@ -60,7 +80,7 @@ export function RollTableManager({
   return (
     <section className="roll-table-manager">
       <h3>Tabelas roláveis</h3>
-      {role === "gm" && (
+      {isManagerRole(role) && (
         <form
           onSubmit={(e) => {
             e.preventDefault();

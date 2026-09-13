@@ -3,7 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ActiveEffect;
+use App\Models\ActorDocument;
 use App\Models\Campaign;
+use App\Models\CampaignAsset;
+use App\Models\CampaignMacro;
+use App\Models\CampaignModule;
+use App\Models\CampaignSubsystem;
 use App\Models\CatalogEntry;
 use App\Models\Combat;
 use App\Models\EncounterBuilderDraft;
@@ -21,7 +27,7 @@ class CampaignExportController extends Controller
 {
     public function show(Request $request, Campaign $campaign)
     {
-        abort_unless($campaign->roleFor($request->user()) === 'gm', 403);
+        abort_unless($campaign->canManage($request->user()), 403);
         $data = $request->validate(['includeMedia' => ['sometimes', 'boolean']]);
         $includeMedia = $data['includeMedia'] ?? true;
         $archive = DB::transaction(function () use ($campaign, $includeMedia) {
@@ -59,6 +65,18 @@ class CampaignExportController extends Controller
                     }
                 }
             }
+            $actorDocuments = ActorDocument::whereIn('actor_id', $actors->modelKeys())->orderBy('id')->get();
+            foreach ($actorDocuments as $document) {
+                if ($document->catalog_entry_id) {
+                    $catalogIds->push((int) $document->catalog_entry_id);
+                }
+            }
+            $subsystems = CampaignSubsystem::where('campaign_id', $campaign->id)->orderBy('id')->get();
+            foreach ($subsystems as $subsystem) {
+                if ($subsystem->catalog_entry_id) {
+                    $catalogIds->push((int) $subsystem->catalog_entry_id);
+                }
+            }
             foreach (EncounterBuilderDraft::where('campaign_id', $campaign->id)->get() as $draft) {
                 foreach ($draft->creatures ?? [] as $creature) {
                     if (! empty($creature['catalogEntryId'])) {
@@ -84,7 +102,10 @@ class CampaignExportController extends Controller
 
             $media = [];
             if ($includeMedia) {
-                $paths = $scenes->pluck('background_path')->merge($actors->pluck('img_path'))->filter()->unique();
+                $paths = $scenes->pluck('background_path')
+                    ->merge($actors->pluck('img_path'))
+                    ->merge(CampaignAsset::where('campaign_id', $campaign->id)->pluck('path'))
+                    ->filter()->unique();
                 $totalBytes = 0;
                 foreach ($paths as $path) {
                     if (! Storage::disk('public')->exists($path)) {
@@ -101,7 +122,7 @@ class CampaignExportController extends Controller
             $rollTables = RollTable::where('campaign_id', $campaign->id)->with('rolls')->orderBy('id')->get();
 
             return [
-                'format' => 'vtt-edson-campaign', 'version' => 2, 'exportedAt' => now()->toIso8601String(),
+                'format' => 'vtt-edson-campaign', 'version' => 3, 'exportedAt' => now()->toIso8601String(),
                 'campaign' => $campaign->only(['name', 'ruleset', 'catalog_sources', 'house_rules']),
                 'actors' => $actors->map(fn ($actor) => [
                     'id' => $actor->id,
@@ -154,6 +175,32 @@ class CampaignExportController extends Controller
                 'lootResults' => LootResult::where('campaign_id', $campaign->id)->orderBy('id')->get()->map(fn ($loot) => $loot->only([
                     'roll_table_roll_id', 'name', 'items', 'currency', 'metadata', 'status', 'applied_actor_id', 'applied_at',
                 ])),
+                'actorDocuments' => $actorDocuments->map(fn (ActorDocument $document) => [
+                    'oldId' => $document->id,
+                    'actor_id' => $document->actor_id,
+                    'catalog_entry_id' => $document->catalog_entry_id,
+                    ...$document->only(['kind', 'name', 'slug', 'source', 'data', 'overrides', 'quantity', 'equipped', 'prepared', 'attuned', 'charges', 'sort']),
+                ]),
+                'activeEffects' => ActiveEffect::whereIn('actor_id', $actors->modelKeys())->orderBy('id')->get()->map(fn (ActiveEffect $effect) => [
+                    'oldId' => $effect->id,
+                    'actor_id' => $effect->actor_id,
+                    'source_document_id' => $effect->source_document_id,
+                    ...$effect->only(['name', 'duration', 'modifiers', 'conditions', 'metadata', 'active']),
+                ]),
+                'assets' => CampaignAsset::where('campaign_id', $campaign->id)->orderBy('id')->get()->map(fn (CampaignAsset $asset) => [
+                    'oldId' => $asset->id,
+                    ...$asset->only(['name', 'kind', 'path', 'mime', 'size_bytes', 'sha256', 'metadata']),
+                ]),
+                'macros' => CampaignMacro::where('campaign_id', $campaign->id)->orderBy('id')->get()->map(fn (CampaignMacro $macro) => $macro->only([
+                    'name', 'icon', 'commands', 'visibility', 'hotbar_slot', 'enabled',
+                ])),
+                'modules' => CampaignModule::where('campaign_id', $campaign->id)->orderBy('id')->get()->map(fn (CampaignModule $module) => $module->only([
+                    'module_id', 'name', 'version', 'manifest', 'permissions', 'enabled',
+                ])),
+                'subsystems' => $subsystems->map(fn (CampaignSubsystem $subsystem) => [
+                    'catalog_entry_id' => $subsystem->catalog_entry_id,
+                    ...$subsystem->only(['kind', 'name', 'state', 'metadata', 'active']),
+                ]),
                 'media' => $media,
                 'remoteMediaNote' => 'URLs remotas continuam referências e dependem da origem. Arquivos enviados localmente estão em media quando includeMedia=1.',
             ];

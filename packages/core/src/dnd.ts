@@ -72,6 +72,7 @@ export const DamageTypeSchema = z.enum(['acid','bludgeoning','cold','fire','forc
 
 export const InventoryItemSchema = z.object({
   id: z.string(),
+  documentId: z.number().int().positive().optional(),
   slug: z.string().nullable().optional(),
   name: z.string(),
   quantity: z.number().default(1),
@@ -85,6 +86,7 @@ export const InventoryItemSchema = z.object({
 
 export const KnownSpellSchema = z.object({
   id: z.string(),
+  documentId: z.number().int().positive().optional(),
   slug: z.string().nullable().optional(),
   name: z.string(),
   level: z.number(),
@@ -97,15 +99,32 @@ export const ActorActionSchema = z.object({
   name: z.string().min(1).max(120),
   kind: z.enum(['attack', 'spell']),
   attackFormula: z.string().optional(),
+  attackAbility: z.enum(['str','dex','con','int','wis','cha','spellcasting','weapon']).optional(),
+  attackBonus: z.number().int().min(-30).max(30).optional(),
   damageFormula: z.string().optional(),
+  damageAbility: z.enum(['str','dex','con','int','wis','cha','spellcasting','weapon']).optional(),
+  damageBonus: z.number().int().min(-30).max(30).optional(),
   spellSlotLevel: z.number().int().min(1).max(9).optional(),
   resourceId: z.string().max(80).optional(),
   resourceCost: z.number().int().min(1).max(1000).optional(),
+  documentId: z.number().int().positive().optional(),
+  chargeCost: z.number().int().min(1).max(1000).optional(),
   saveAbility: z.enum(['str', 'dex', 'con', 'int', 'wis', 'cha']).optional(),
   saveDc: z.number().int().min(1).max(99).optional(),
   saveEffect: z.enum(['half','none']).optional(),
   damageType: DamageTypeSchema.optional(),
   concentration: z.boolean().optional(),
+  effect: z.object({
+    name: z.string().min(1).max(160),
+    target: z.enum(['self', 'targets']).default('targets'),
+    trigger: z.enum(['on-use','on-hit','on-failed-save']).default('on-use'),
+    duration: z.object({
+      unit: z.enum(['rounds','minutes','hours','until-short-rest','until-long-rest','permanent']),
+      remaining: z.number().int().min(0).max(100000).optional(),
+    }),
+    modifiers: z.array(z.object({ path: z.string(), mode: z.enum(['add','multiply','override']), value: z.union([z.number(), z.string().regex(/^\d*d\d+(?:[+-]\d+)?$/i)]) })).max(30).default([]),
+    conditions: z.array(z.string().max(120)).max(20).default([]),
+  }).optional(),
   economy: z.enum(['action','bonus','reaction','other']).optional(),
   description: z.string().optional(),
   effectUrl: z.string().url().refine((url) => url.startsWith('https://'), 'Use uma URL HTTPS para o efeito.').optional(),
@@ -121,10 +140,44 @@ export const ActorResourceSchema = z.object({
 
 export const FeatureSchema = z.object({
   id: z.string(),
+  documentId: z.number().int().positive().optional(),
   name: z.string(),
   source: z.string().optional(),
   level: z.number().int().min(1).max(20).optional(),
   description: z.string().optional(),
+})
+
+export const ActorDocumentSchema = z.object({
+  id: z.number(),
+  actor_id: z.number(),
+  catalog_entry_id: z.number().nullable().optional(),
+  kind: z.enum(['item', 'spell', 'feature']),
+  name: z.string(),
+  slug: z.string().nullable().optional(),
+  source: z.string().nullable().optional(),
+  data: z.record(z.string(), z.unknown()).default({}),
+  overrides: z.record(z.string(), z.unknown()).default({}),
+  quantity: z.number().int().min(1).default(1),
+  equipped: z.boolean().default(false),
+  prepared: z.boolean().default(false),
+  attuned: z.boolean().default(false),
+  charges: z.object({ value: z.number().int().min(0), max: z.number().int().min(0), reset: z.enum(['short','long','dawn','manual']), recoveryFormula: z.string().regex(/^\d*d\d+(?:[+-]\d+)?$/i).optional() }).nullable().optional(),
+  sort: z.number().int().min(0).default(0),
+})
+
+export const ActiveEffectSchema = z.object({
+  id: z.number(),
+  actor_id: z.number(),
+  source_document_id: z.number().nullable().optional(),
+  name: z.string(),
+  duration: z.object({
+    unit: z.enum(['rounds','minutes','hours','until-short-rest','until-long-rest','permanent']),
+    remaining: z.number().int().min(0).nullable().optional(),
+  }),
+  modifiers: z.array(z.object({ path: z.string(), mode: z.enum(['add','multiply','override']), value: z.union([z.number(), z.string().regex(/^\d*d\d+(?:[+-]\d+)?$/i)]) })).default([]),
+  conditions: z.array(z.string()).default([]),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  active: z.boolean().default(true),
 })
 
 export const ClassProgressionSchema = z.object({
@@ -216,6 +269,8 @@ export const ActorSchema = z.object({
   imgPath: z.string().nullable().optional(),
   imgUrl: z.string().nullable().optional(),
   system: ActorSystemSchema,
+  documents: z.array(ActorDocumentSchema).default([]),
+  activeEffects: z.array(ActiveEffectSchema).default([]),
 })
 
 export type ActorSystem = z.infer<typeof ActorSystemSchema>
@@ -227,6 +282,8 @@ export type ActorResource = z.infer<typeof ActorResourceSchema>
 export type ClassProgression = z.infer<typeof ClassProgressionSchema>
 export type SubclassProgression = z.infer<typeof SubclassProgressionSchema>
 export type Feature = z.infer<typeof FeatureSchema>
+export type ActorDocument = z.infer<typeof ActorDocumentSchema>
+export type ActiveEffect = z.infer<typeof ActiveEffectSchema>
 
 /** Ficha "portátil" pra import/export — mesmo shape que ActorController::export devolve. */
 export const CharacterImportSchema = z.object({

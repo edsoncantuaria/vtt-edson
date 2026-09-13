@@ -1,10 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Actor, ActorSystem } from "@vtt/core";
 import { CharacterImportSchema, buildModifierFormula } from "@vtt/core";
 import { api } from "../lib/api";
 import { rollToChat } from "../lib/roll";
 import { updateScene } from "../lib/scene";
-import { useSession } from "../store/session";
+import { pluginRegistry } from "../lib/plugins";
+import { isManagerRole, useSession } from "../store/session";
 import { Icon } from "./Icon";
 import { Modal } from "./Modal";
 import { ActorEditor } from "./ActorEditor";
@@ -24,6 +25,7 @@ export function ActorSheet() {
     sceneId,
     roomCode,
     selectedActorId,
+    targetActorIds,
     setSelectedActorId,
     upsertActor,
     removeActor,
@@ -46,7 +48,8 @@ export function ActorSheet() {
   const actionRequest = useRef<{ key: string; id: string } | null>(null);
   const importer = useRef<HTMLInputElement>(null);
   const actor = actors.find((a) => a.id === selectedActorId);
-  const canEdit = actor && (role === "gm" || actor.ownerUserId === user?.id);
+  const actorId = actor?.id;
+  const canEdit = actor && (isManagerRole(role) || actor.ownerUserId === user?.id);
   const report = (e: unknown) =>
     setError(e instanceof Error ? e.message : "Não foi possível concluir a ação.");
   const form = (mod: number) =>
@@ -54,6 +57,9 @@ export function ActorSheet() {
       advantage: mode === "advantage",
       disadvantage: mode === "disadvantage",
     });
+  useEffect(() => {
+    if (actorId) void pluginRegistry.hooks.emit("actor:opened", { actorId });
+  }, [actorId]);
   async function uploadPortrait(file: File) {
     if (!actor || busy) return;
     setBusy(true);
@@ -89,11 +95,24 @@ export function ActorSheet() {
     if (actionRequest.current?.key !== key)
       actionRequest.current = { key, id: crypto.randomUUID() };
     try {
-      await updateScene(sceneId, "/actions", {
+      await pluginRegistry.hooks.emit("action:before", {
+        sceneId,
+        actorId: actor.id,
+        actionId,
+      });
+      const result = await updateScene(sceneId, "/actions", {
         actorId: actor.id,
         actionId,
         requestId: actionRequest.current.id,
         mode,
+        targetActorIds,
+      });
+      const message = (result as { message?: { id?: unknown } }).message;
+      await pluginRegistry.hooks.emit("action:after", {
+        sceneId,
+        actorId: actor.id,
+        actionId,
+        ...(typeof message?.id === "string" ? { messageId: message.id } : {}),
       });
       actionRequest.current = null;
     } catch (e) {
@@ -113,6 +132,7 @@ export function ActorSheet() {
         body: JSON.stringify({ system, revision: actor.revision ?? 0 }),
       });
       upsertActor(res.actor);
+      await pluginRegistry.hooks.emit("actor:updated", { actorId: res.actor.id });
     } catch (e) {
       report(e);
     } finally {
@@ -211,9 +231,11 @@ export function ActorSheet() {
           {!actors.length && (
             <div className="panel-empty">
               <Icon name="shield" size={38} />
-              <h3>{role === "gm" ? "Quem faz parte desta história?" : "Seu herói começa aqui."}</h3>
+              <h3>
+                {isManagerRole(role) ? "Quem faz parte desta história?" : "Seu herói começa aqui."}
+              </h3>
               <p>
-                {role === "gm"
+                {isManagerRole(role)
                   ? "Crie personagens, aliados e criaturas. Depois, coloque-os na cena."
                   : "Crie sua ficha e peça ao mestre para colocar seu token no mapa."}
               </p>
@@ -266,7 +288,7 @@ export function ActorSheet() {
         </>
       ) : (
         <>
-          {role === "gm" && (
+          {isManagerRole(role) && (
             <label>
               <input
                 type="checkbox"
@@ -424,7 +446,7 @@ export function ActorSheet() {
                 placeholder="Nome do personagem"
               />
             </label>
-            {role === "gm" && (
+            {isManagerRole(role) && (
               <label>
                 Tipo
                 <select value={type} onChange={(e) => setType(e.target.value as Actor["type"])}>

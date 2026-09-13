@@ -18,6 +18,8 @@ final class ExecuteSceneActionRequest extends FormRequest
             'actionId' => ['required', 'string', 'max:80'],
             'mode' => ['sometimes', 'in:normal,advantage,disadvantage'],
             'requestId' => ['sometimes', 'uuid'],
+            'targetActorIds' => ['sometimes', 'array', 'max:50'],
+            'targetActorIds.*' => ['integer', 'distinct', 'exists:actors,id'],
         ];
     }
 }

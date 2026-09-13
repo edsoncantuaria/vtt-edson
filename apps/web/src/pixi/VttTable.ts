@@ -1,6 +1,7 @@
 import { Application, Assets, Container, Graphics, Sprite, Text, TextStyle } from "pixi.js";
 import type { Actor, AreaTemplate, AreaTemplateKind, SceneState, Role } from "@vtt/core";
 import type { Tool } from "../store/session";
+import type { CanvasObjectKind } from "../lib/canvasObjects";
 import { publicAssetUrl } from "../lib/assets";
 import {
   pointInAreaTemplate,
@@ -15,6 +16,12 @@ export type TableCallbacks = {
   onDoorCreate: (x1: number, y1: number, x2: number, y2: number) => void;
   onLightCreate: (x: number, y: number) => void;
   onFogPaint: (x: number, y: number, w: number, h: number) => void;
+  onDrawingCreate: (points: Array<{ x: number; y: number }>) => void;
+  onLabelCreate: (x: number, y: number) => void;
+  onPing: (x: number, y: number) => void;
+  onRegionCreate: (x: number, y: number, w: number, h: number) => void;
+  onCanvasSelect: (kind: CanvasObjectKind | null, id: string | null) => void;
+  onCanvasMove: (kind: CanvasObjectKind, id: string, dx: number, dy: number) => void;
   onZoom: (zoom: number) => void;
   onActorOpen: (actorId: number) => void;
   onTokenSelection: (tokenIds: string[]) => void;
@@ -27,6 +34,7 @@ type MountOpts = {
   userId: number;
   getTool: () => Tool;
   getActors: () => Actor[];
+  canEditScene: boolean;
   callbacks: TableCallbacks;
 };
 
@@ -34,7 +42,9 @@ export class VttTable {
   app: Application;
   world = new Container();
   bgLayer = new Container();
+  tileLayer = new Container();
   gridLayer = new Graphics();
+  canvasLayer = new Container();
   tokenLayer = new Container();
   wallLayer = new Graphics();
   lightMask = new Graphics();
@@ -45,12 +55,16 @@ export class VttTable {
   userId: number;
   getTool: () => Tool;
   getActors: () => Actor[];
+  canEditScene: boolean;
   callbacks: TableCallbacks;
   state: SceneState | null = null;
   backgroundUrl: string | null = null;
   bgSprite: Sprite | null = null;
   draggingToken: { id: string; g: Container; ox: number; oy: number } | null = null;
+  draggingCanvas: { kind: CanvasObjectKind; id: string; startX: number; startY: number } | null =
+    null;
   draftStart: { x: number; y: number } | null = null;
+  draftPath: Array<{ x: number; y: number }> = [];
   panning = false;
   panOrigin = { x: 0, y: 0, wx: 0, wy: 0 };
   ready = false;
@@ -68,6 +82,7 @@ export class VttTable {
     this.userId = opts.userId;
     this.getTool = opts.getTool;
     this.getActors = opts.getActors;
+    this.canEditScene = opts.canEditScene;
     this.callbacks = opts.callbacks;
   }
 
@@ -93,7 +108,9 @@ export class VttTable {
     this.host.replaceChildren();
     this.host.appendChild(this.app.canvas);
     this.world.addChild(this.bgLayer);
+    this.world.addChild(this.tileLayer);
     this.world.addChild(this.gridLayer);
+    this.world.addChild(this.canvasLayer);
     this.world.addChild(this.tokenLayer);
     this.world.addChild(this.wallLayer);
     this.world.addChild(this.lightMask);
@@ -211,10 +228,97 @@ export class VttTable {
       }
       this.fit();
     }
+    await this.drawCanvas(state, version);
     this.drawGrid(state);
     this.drawWalls(state);
     if (!this.draggingToken) this.drawTokens(state);
     this.drawFogAndLight(state);
+  }
+
+  private async drawCanvas(state: SceneState, version: number) {
+    for (const child of this.tileLayer.removeChildren()) child.destroy({ children: true });
+    for (const child of this.canvasLayer.removeChildren()) child.destroy({ children: true });
+
+    for (const region of state.regions) {
+      const color =
+        region.behavior === "danger"
+          ? 0xd94a5f
+          : region.behavior === "difficult-terrain"
+            ? 0xd9a441
+            : 0x6fc3ff;
+      this.canvasLayer.addChild(
+        new Graphics()
+          .rect(region.x, region.y, region.w, region.h)
+          .fill({ color, alpha: 0.08 })
+          .stroke({ width: 2, color, alpha: 0.55 }),
+      );
+    }
+
+    for (const drawing of state.drawings) {
+      if (drawing.points.length < 2) continue;
+      const graphic = new Graphics();
+      graphic.setStrokeStyle({
+        width: drawing.width,
+        color: Number.parseInt(drawing.stroke.slice(1), 16),
+        alpha: 0.9,
+      });
+      graphic.moveTo(drawing.points[0].x, drawing.points[0].y);
+      for (const point of drawing.points.slice(1)) graphic.lineTo(point.x, point.y);
+      graphic.stroke();
+      this.canvasLayer.addChild(graphic);
+    }
+
+    for (const label of state.labels) {
+      const text = new Text({
+        text: label.text,
+        style: new TextStyle({
+          fill: 0xf1ece1,
+          fontSize: label.fontSize,
+          fontFamily: "Archivo",
+          fontWeight: "600",
+          dropShadow: { color: 0x0d0a07, blur: 3, distance: 1, angle: Math.PI / 4 },
+        }),
+      });
+      text.x = label.x;
+      text.y = label.y;
+      this.canvasLayer.addChild(text);
+    }
+
+    const now = Date.now();
+    for (const ping of state.pings) {
+      if (now - Date.parse(ping.createdAt) > 15000) continue;
+      this.canvasLayer.addChild(
+        new Graphics()
+          .circle(ping.x, ping.y, 18)
+          .stroke({ width: 4, color: 0x6fc3ff, alpha: 0.95 }),
+      );
+      const label = new Text({
+        text: ping.label ?? ping.userName,
+        style: { fill: 0xf1ece1, fontSize: 12, fontFamily: "Archivo", fontWeight: "600" },
+      });
+      label.x = ping.x + 24;
+      label.y = ping.y - 8;
+      this.canvasLayer.addChild(label);
+    }
+
+    await Promise.all(
+      state.tiles.map(async (tile) => {
+        try {
+          const texture = await Assets.load(tile.url);
+          if (this.destroyed || version !== this.renderVersion) return;
+          const sprite = new Sprite(texture);
+          sprite.x = tile.x;
+          sprite.y = tile.y;
+          sprite.width = tile.w;
+          sprite.height = tile.h;
+          sprite.alpha = tile.opacity;
+          sprite.rotation = (tile.rotation * Math.PI) / 180;
+          this.tileLayer.addChild(sprite);
+        } catch {
+          // A missing prop should not prevent the rest of the tactical map from rendering.
+        }
+      }),
+    );
   }
 
   private drawGrid(state: SceneState) {
@@ -275,7 +379,7 @@ export class VttTable {
       c.y = token.y;
       c.alpha = token.detected ? 0.78 : 1;
       c.eventMode = "static";
-      c.cursor = this.role === "gm" || token.ownerUserId === this.userId ? "grab" : "default";
+      c.cursor = this.canEditScene || token.ownerUserId === this.userId ? "grab" : "default";
       (c as Container & { tokenId?: string }).tokenId = token.id;
 
       const actor = token.actorId ? actors.find((a) => a.id === token.actorId) : undefined;
@@ -414,7 +518,7 @@ export class VttTable {
       if (points.length > 2) fog.poly(points.flatMap((point) => [point.x, point.y])).cut();
     };
 
-    if (this.role === "gm") {
+    if (this.canEditScene) {
       fog.rect(0, 0, w, h).fill({ color: 0x0d0a07, alpha: 0.5 });
       for (const r of state.fog.revealed) {
         fog.rect(r.x, r.y, r.w, r.h).cut();
@@ -530,6 +634,51 @@ export class VttTable {
     };
   }
 
+  private canvasHit(x: number, y: number): { kind: CanvasObjectKind; id: string } | null {
+    if (!this.state || !this.canEditScene) return null;
+    for (const label of [...this.state.labels].reverse()) {
+      const w = Math.max(label.fontSize * 2, label.text.length * label.fontSize * 0.55);
+      if (
+        x >= label.x - 6 &&
+        x <= label.x + w + 6 &&
+        y >= label.y - 6 &&
+        y <= label.y + label.fontSize * 1.5
+      )
+        return { kind: "labels", id: label.id };
+    }
+    for (const tile of [...this.state.tiles].reverse()) {
+      if (x >= tile.x && x <= tile.x + tile.w && y >= tile.y && y <= tile.y + tile.h)
+        return { kind: "tiles", id: tile.id };
+    }
+    for (const region of [...this.state.regions].reverse()) {
+      if (x >= region.x && x <= region.x + region.w && y >= region.y && y <= region.y + region.h)
+        return { kind: "regions", id: region.id };
+    }
+    for (const drawing of [...this.state.drawings].reverse()) {
+      for (let i = 1; i < drawing.points.length; i++) {
+        if (
+          this.pointSegmentDistance(x, y, drawing.points[i - 1], drawing.points[i]) <=
+          Math.max(8, drawing.width + 4)
+        )
+          return { kind: "drawings", id: drawing.id };
+      }
+    }
+    return null;
+  }
+
+  private pointSegmentDistance(
+    x: number,
+    y: number,
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+  ) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    if (dx === 0 && dy === 0) return Math.hypot(x - a.x, y - a.y);
+    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(x - (a.x + t * dx), y - (a.y + t * dy));
+  }
+
   private bindInput() {
     const canvas = this.app.canvas;
     canvas.style.touchAction = "none";
@@ -568,6 +717,14 @@ export class VttTable {
       }
       const tool = this.getTool();
       const p = this.worldPoint(e);
+      if (tool === "ping") {
+        this.callbacks.onPing(p.x, p.y);
+        return;
+      }
+      if (tool === "label" && this.canEditScene) {
+        this.callbacks.onLabelCreate(p.x, p.y);
+        return;
+      }
       if (tool === "pan" || e.button === 1 || e.button === 2) {
         this.panning = true;
         this.panOrigin = {
@@ -599,7 +756,7 @@ export class VttTable {
               : [hit.tokenId];
             this.selectTokens(next, false);
           }
-          if (this.role !== "gm" && token?.ownerUserId !== this.userId) {
+          if (!this.canEditScene && token?.ownerUserId !== this.userId) {
             if (tool === "select" && this.state) this.drawTokens(this.state);
             return;
           }
@@ -610,6 +767,16 @@ export class VttTable {
             oy: p.y - hit.y,
           };
           return;
+        }
+        if (tool === "select" && this.canEditScene) {
+          const canvasHit = this.canvasHit(p.x, p.y);
+          if (canvasHit) {
+            this.selectTokens([], false);
+            this.draggingCanvas = { ...canvasHit, startX: p.x, startY: p.y };
+            this.callbacks.onCanvasSelect(canvasHit.kind, canvasHit.id);
+            return;
+          }
+          this.callbacks.onCanvasSelect(null, null);
         }
         if (tool === "select") {
           if (e.pointerType === "touch") {
@@ -624,7 +791,7 @@ export class VttTable {
             this.selectTokens([]);
           }
         }
-        if (tool === "token" && this.role === "gm") {
+        if (tool === "token" && this.canEditScene) {
           const s = this.snap(p.x, p.y);
           this.callbacks.onTokenCreate(s.x, s.y);
         }
@@ -636,8 +803,13 @@ export class VttTable {
         return;
       }
 
-      if (this.role !== "gm") return;
-      if (tool === "wall" || tool === "door" || tool === "fog") {
+      if (!this.canEditScene) return;
+      if (tool === "draw") {
+        this.draftStart = p;
+        this.draftPath = [p];
+        return;
+      }
+      if (tool === "wall" || tool === "door" || tool === "fog" || tool === "region") {
         this.draftStart = p;
         return;
       }
@@ -682,20 +854,41 @@ export class VttTable {
         this.draggingToken.g.y = s.y;
         return;
       }
+      if (this.draggingCanvas) {
+        for (const child of this.draft.removeChildren()) child.destroy();
+        this.draft.clear();
+        this.draft.setStrokeStyle({ width: 2, color: 0x6fc3ff, alpha: 0.9 });
+        this.draft.moveTo(this.draggingCanvas.startX, this.draggingCanvas.startY);
+        this.draft.lineTo(p.x, p.y);
+        this.draft.stroke();
+        return;
+      }
       if (this.draftStart) {
         const tool = this.getTool();
+        if (tool === "draw") {
+          this.draftPath.push(p);
+          for (const child of this.draft.removeChildren()) child.destroy();
+          this.draft.clear();
+          this.draft.setStrokeStyle({ width: 3, color: 0x6fc3ff, alpha: 0.9 });
+          this.draft.moveTo(this.draftPath[0].x, this.draftPath[0].y);
+          for (const point of this.draftPath.slice(1)) this.draft.lineTo(point.x, point.y);
+          this.draft.stroke();
+          return;
+        }
         if (["ruler", "circle", "cone", "line", "radius"].includes(tool)) {
           this.drawTemplate(tool, this.draftStart, p);
           return;
         }
         for (const child of this.draft.removeChildren()) child.destroy();
         this.draft.clear();
-        if (tool === "fog") {
+        if (tool === "fog" || tool === "region") {
           const x = Math.min(this.draftStart.x, p.x);
           const y = Math.min(this.draftStart.y, p.y);
           const w = Math.abs(p.x - this.draftStart.x);
           const h = Math.abs(p.y - this.draftStart.y);
-          this.draft.rect(x, y, w, h).fill({ color: 0x52b788, alpha: 0.28 });
+          this.draft
+            .rect(x, y, w, h)
+            .fill({ color: tool === "region" ? 0x6fc3ff : 0x52b788, alpha: 0.22 });
         } else {
           this.draft.setStrokeStyle({ width: 3, color: 0xd9a441 });
           this.draft.moveTo(this.draftStart.x, this.draftStart.y);
@@ -727,10 +920,29 @@ export class VttTable {
         this.draggingToken = null;
         return;
       }
+      if (this.draggingCanvas) {
+        const active = this.draggingCanvas;
+        const dx = p.x - active.startX;
+        const dy = p.y - active.startY;
+        this.draggingCanvas = null;
+        for (const child of this.draft.removeChildren()) child.destroy();
+        this.draft.clear();
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1)
+          this.callbacks.onCanvasMove(active.kind, active.id, dx, dy);
+        return;
+      }
+      if (this.draftStart && this.canEditScene && this.getTool() === "draw") {
+        if (this.draftPath.length > 1) this.callbacks.onDrawingCreate(this.draftPath);
+        this.draftPath = [];
+        this.draftStart = null;
+        for (const child of this.draft.removeChildren()) child.destroy();
+        this.draft.clear();
+        return;
+      }
       if (
         this.draftStart &&
-        this.role === "gm" &&
-        ["wall", "door", "fog"].includes(this.getTool())
+        this.canEditScene &&
+        ["wall", "door", "fog", "region"].includes(this.getTool())
       ) {
         const tool = this.getTool();
         if (tool === "wall")
@@ -743,6 +955,13 @@ export class VttTable {
           const w = Math.abs(p.x - this.draftStart.x);
           const h = Math.abs(p.y - this.draftStart.y);
           if (w > 4 && h > 4) this.callbacks.onFogPaint(x, y, w, h);
+        }
+        if (tool === "region") {
+          const x = Math.min(this.draftStart.x, p.x);
+          const y = Math.min(this.draftStart.y, p.y);
+          const w = Math.abs(p.x - this.draftStart.x);
+          const h = Math.abs(p.y - this.draftStart.y);
+          if (w > 4 && h > 4) this.callbacks.onRegionCreate(x, y, w, h);
         }
         this.draftStart = null;
         for (const child of this.draft.removeChildren()) child.destroy();
@@ -786,6 +1005,7 @@ export class VttTable {
       this.panning = false;
       this.draggingToken = null;
       this.draftStart = null;
+      this.draftPath = [];
       for (const child of this.draft.removeChildren()) child.destroy();
       this.draft.clear();
       if (this.state) this.drawTokens(this.state);

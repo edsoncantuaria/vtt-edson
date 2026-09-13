@@ -26,6 +26,11 @@ export function LootManager({
   useEffect(() => {
     void refresh().catch((e) => setMessage(e.message));
   }, [refresh]);
+  useEffect(() => {
+    const changed = () => void refresh().catch((e) => setMessage(e.message));
+    window.addEventListener("vtt:loot-changed", changed);
+    return () => window.removeEventListener("vtt:loot-changed", changed);
+  }, [refresh]);
 
   async function saveSeed() {
     if (!campaignId || !seed) return;

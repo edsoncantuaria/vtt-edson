@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { useSession } from "../store/session";
+import { isManagerRole, useSession } from "../store/session";
 
 type Entry = {
   id: number;
@@ -99,7 +99,7 @@ export function HomebrewManager() {
         Pacotes versionados agrupam regras e conteúdo estruturado. Pacotes desativados ficam
         preservados sem aparecer para jogadores.
       </p>
-      {role === "gm" && (
+      {isManagerRole(role) && (
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -126,7 +126,7 @@ export function HomebrewManager() {
           <summary>
             {pkg.name} · v{pkg.version} · {pkg.enabled ? "ativo" : "desativado"}
           </summary>
-          {role === "gm" && (
+          {isManagerRole(role) && (
             <button
               disabled={busy}
               onClick={() => {
@@ -152,7 +152,7 @@ export function HomebrewManager() {
               <pre>{JSON.stringify(entry.data, null, 2)}</pre>
             </article>
           ))}
-          {role === "gm" && (
+          {isManagerRole(role) && (
             <form
               onSubmit={(event) => {
                 event.preventDefault();

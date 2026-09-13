@@ -9,6 +9,8 @@ import {
   type ActorSystem,
   type SkillKey,
 } from "@vtt/core";
+import { api } from "../../lib/api";
+import { useSession } from "../../store/session";
 import { Icon } from "../Icon";
 
 const ABILITIES: Ability[] = ["str", "dex", "con", "int", "wis", "cha"];
@@ -138,6 +140,21 @@ export function EquipmentTab({
   roll: Roll;
   change: ChangeActor;
 }) {
+  const upsertActor = useSession((state) => state.upsertActor);
+  const setError = useSession((state) => state.setError);
+
+  async function updateDocument(documentId: number, data: object) {
+    try {
+      const result = await api<{ actor: Actor }>(`/actor-documents/${documentId}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      });
+      upsertActor(result.actor);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Não foi possível atualizar o item.");
+    }
+  }
+
   return (
     <div className="sheet-items">
       {!actor.system.inventory.length && (
@@ -145,49 +162,116 @@ export function EquipmentTab({
           A mochila está vazia. Adicione itens pelo compêndio ou pela edição da ficha.
         </p>
       )}
-      {actor.system.inventory.map((item) => (
-        <article key={item.id}>
-          <div>
-            <h4>{item.name}</h4>
-            <small>
-              {item.quantity} un. {item.equipped ? "· Equipado" : ""}
-            </small>
-          </div>
-          {item.description && <p>{item.description}</p>}
-          <div className="item-actions">
-            {item.attackBonus !== undefined && (
-              <button
-                disabled={!canEdit || busy}
-                onClick={() => void roll(formula(item.attackBonus!), `${item.name} · ataque`)}
-              >
-                <Icon name="swords" size={14} />
-                Atacar {formatModifier(item.attackBonus)}
-              </button>
-            )}
-            {item.damage && (
-              <button
-                disabled={!canEdit || busy}
-                onClick={() => void roll(item.damage!, `${item.name} · dano`)}
-              >
-                Dano {item.damage}
-              </button>
-            )}
-            {canEdit && (
+      {actor.system.inventory.map((item) => {
+        const document = actor.documents.find(
+          (candidate) =>
+            candidate.kind === "item" &&
+            ((candidate.id === item.documentId && item.documentId) ||
+              (candidate.data.id === item.id && item.id) ||
+              (candidate.slug && candidate.slug === item.slug && candidate.name === item.name)),
+        );
+        return (
+          <article key={item.id}>
+            <div>
+              <h4>{item.name}</h4>
+              <small>
+                {item.quantity} un. {item.equipped ? "· Equipado" : ""}
+              </small>
+            </div>
+            {item.description && <p>{item.description}</p>}
+            <div className="item-actions">
+              {item.attackBonus !== undefined && (
+                <button
+                  disabled={!canEdit || busy}
+                  onClick={() => void roll(formula(item.attackBonus!), `${item.name} · ataque`)}
+                >
+                  <Icon name="swords" size={14} />
+                  Atacar {formatModifier(item.attackBonus)}
+                </button>
+              )}
+              {item.damage && (
+                <button
+                  disabled={!canEdit || busy}
+                  onClick={() => void roll(item.damage!, `${item.name} · dano`)}
+                >
+                  Dano {item.damage}
+                </button>
+              )}
+              {canEdit && (
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    document
+                      ? void updateDocument(document.id, { equipped: !document.equipped })
+                      : void change((system) => {
+                          const target = system.inventory.find((entry) => entry.id === item.id);
+                          if (target) target.equipped = !target.equipped;
+                        })
+                  }
+                >
+                  {item.equipped ? "Guardar" : "Equipar"}
+                </button>
+              )}
+              {canEdit && document && (
+                <button
+                  disabled={busy}
+                  aria-pressed={document.attuned}
+                  onClick={() => void updateDocument(document.id, { attuned: !document.attuned })}
+                >
+                  {document.attuned ? "Sintonizado" : "Sintonizar"}
+                </button>
+              )}
+            </div>
+            {document?.charges ? (
+              <div className="slot-list">
+                <div>
+                  <span>
+                    Cargas <small>recupera: {document.charges.reset}</small>
+                  </span>
+                  <b>
+                    {document.charges.value}/{document.charges.max}
+                  </b>
+                  {canEdit && (
+                    <>
+                      <button
+                        disabled={busy || document.charges.value <= 0}
+                        onClick={() =>
+                          void updateDocument(document.id, {
+                            charges: { ...document.charges!, value: document.charges!.value - 1 },
+                          })
+                        }
+                      >
+                        Gastar
+                      </button>
+                      <button
+                        disabled={busy || document.charges.value >= document.charges.max}
+                        onClick={() =>
+                          void updateDocument(document.id, {
+                            charges: { ...document.charges!, value: document.charges!.value + 1 },
+                          })
+                        }
+                      >
+                        Recuperar
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : canEdit && document ? (
               <button
                 disabled={busy}
                 onClick={() =>
-                  void change((system) => {
-                    const target = system.inventory.find((entry) => entry.id === item.id);
-                    if (target) target.equipped = !target.equipped;
+                  void updateDocument(document.id, {
+                    charges: { value: 1, max: 1, reset: "long" },
                   })
                 }
               >
-                {item.equipped ? "Guardar" : "Equipar"}
+                Configurar cargas
               </button>
-            )}
-          </div>
-        </article>
-      ))}
+            ) : null}
+          </article>
+        );
+      })}
       <div className="currency-row">
         {Object.entries(actor.system.currency).map(([coin, amount]) => (
           <span key={coin}>
@@ -340,6 +424,20 @@ export function SpellsTab({
   busy: boolean;
   change: ChangeActor;
 }) {
+  const upsertActor = useSession((state) => state.upsertActor);
+  const setError = useSession((state) => state.setError);
+  async function updateDocument(documentId: number, prepared: boolean) {
+    try {
+      const result = await api<{ actor: Actor }>(`/actor-documents/${documentId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ prepared }),
+      });
+      upsertActor(result.actor);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Não foi possível preparar a magia.");
+    }
+  }
+
   return (
     <div className="sheet-items">
       <h4 className="sheet-section-title">
@@ -381,27 +479,38 @@ export function SpellsTab({
       {!actor.system.spells.known.length && (
         <p className="panel-hint">Adicione suas magias pelo compêndio ou edite a ficha.</p>
       )}
-      {actor.system.spells.known.map((spell) => (
-        <article key={spell.id}>
-          <div>
-            <h4>{spell.name}</h4>
-            <small>{spell.level === 0 ? "Truque" : `${spell.level}º círculo`}</small>
-          </div>
-          {spell.description && <p>{spell.description}</p>}
-          <button
-            disabled={!canEdit || busy}
-            aria-pressed={spell.prepared}
-            onClick={() =>
-              void change((system) => {
-                const target = system.spells.known.find((entry) => entry.id === spell.id);
-                if (target) target.prepared = !target.prepared;
-              })
-            }
-          >
-            {spell.prepared ? "Preparada" : "Preparar magia"}
-          </button>
-        </article>
-      ))}
+      {actor.system.spells.known.map((spell) => {
+        const document = actor.documents.find(
+          (candidate) =>
+            candidate.kind === "spell" &&
+            ((candidate.id === spell.documentId && spell.documentId) ||
+              (candidate.data.id === spell.id && spell.id) ||
+              (candidate.slug && candidate.slug === spell.slug && candidate.name === spell.name)),
+        );
+        return (
+          <article key={spell.id}>
+            <div>
+              <h4>{spell.name}</h4>
+              <small>{spell.level === 0 ? "Truque" : `${spell.level}º círculo`}</small>
+            </div>
+            {spell.description && <p>{spell.description}</p>}
+            <button
+              disabled={!canEdit || busy}
+              aria-pressed={spell.prepared}
+              onClick={() =>
+                document
+                  ? void updateDocument(document.id, !document.prepared)
+                  : void change((system) => {
+                      const target = system.spells.known.find((entry) => entry.id === spell.id);
+                      if (target) target.prepared = !target.prepared;
+                    })
+              }
+            >
+              {spell.prepared ? "Preparada" : "Preparar magia"}
+            </button>
+          </article>
+        );
+      })}
     </div>
   );
 }

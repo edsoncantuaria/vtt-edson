@@ -17,7 +17,7 @@ export function parseCampaignBackup(text: string): CampaignArchive {
   if (archive.format !== "vtt-edson-campaign") {
     throw new Error("O arquivo não foi reconhecido como backup do VTT Edson.");
   }
-  if (archive.version !== 1 && archive.version !== 2) {
+  if (archive.version !== 1 && archive.version !== 2 && archive.version !== 3) {
     throw new Error("A versão deste backup não é compatível com esta instalação.");
   }
   return archive as CampaignArchive;

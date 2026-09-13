@@ -31,6 +31,6 @@ class SceneMember extends Model
 
     public function isGm(): bool
     {
-        return $this->role === 'gm';
+        return in_array($this->role, ['gm', 'assistant'], true);
     }
 }

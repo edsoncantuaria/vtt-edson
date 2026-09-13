@@ -55,6 +55,38 @@ export const LightSchema = z.object({
   radius: z.number().min(0),
 })
 
+export const DrawingSchema = z.object({
+  id: z.string(),
+  kind: z.enum(['freehand', 'rectangle', 'ellipse']).default('freehand'),
+  points: z.array(z.object({ x: z.number(), y: z.number() })).min(2).max(500),
+  stroke: z.string().default('#6fc3ff'),
+  width: z.number().min(1).max(30).default(3),
+  fill: z.string().nullable().optional(),
+  hidden: z.boolean().default(false),
+})
+
+export const SceneLabelSchema = z.object({
+  id: z.string(), x: z.number(), y: z.number(), text: z.string().max(500),
+  fontSize: z.number().min(8).max(96).default(20), hidden: z.boolean().default(false),
+})
+
+export const TileSchema = z.object({
+  id: z.string(), x: z.number(), y: z.number(), w: z.number().min(4), h: z.number().min(4),
+  url: z.string(), assetId: z.number().nullable().optional(), opacity: z.number().min(0).max(1).default(1),
+  rotation: z.number().default(0), hidden: z.boolean().default(false),
+})
+
+export const RegionSchema = z.object({
+  id: z.string(), x: z.number(), y: z.number(), w: z.number().min(1), h: z.number().min(1),
+  name: z.string().max(160), behavior: z.enum(['none','difficult-terrain','trigger','danger']).default('none'),
+  note: z.string().max(1000).nullable().optional(), hidden: z.boolean().default(false),
+})
+
+export const PingSchema = z.object({
+  id: z.string(), x: z.number(), y: z.number(), label: z.string().max(80).nullable().optional(),
+  userName: z.string().max(120), createdAt: z.string(),
+})
+
 export const FogRectSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -92,6 +124,11 @@ export const SceneStateSchema = z.object({
   walls: z.array(WallSchema),
   doors: z.array(DoorSchema),
   lights: z.array(LightSchema),
+  drawings: z.array(DrawingSchema).default([]),
+  labels: z.array(SceneLabelSchema).default([]),
+  tiles: z.array(TileSchema).default([]),
+  regions: z.array(RegionSchema).default([]),
+  pings: z.array(PingSchema).default([]),
   vision: z.object({
     dynamic: z.boolean().default(false),
     darkness: z.boolean().default(false),
@@ -113,6 +150,11 @@ export type Door = z.infer<typeof DoorSchema>
 export type AreaTemplateKind = z.infer<typeof AreaTemplateKindSchema>
 export type AreaTemplate = z.infer<typeof AreaTemplateSchema>
 export type Light = z.infer<typeof LightSchema>
+export type Drawing = z.infer<typeof DrawingSchema>
+export type SceneLabel = z.infer<typeof SceneLabelSchema>
+export type Tile = z.infer<typeof TileSchema>
+export type Region = z.infer<typeof RegionSchema>
+export type Ping = z.infer<typeof PingSchema>
 export type FogRect = z.infer<typeof FogRectSchema>
 export type ChatMessage = z.infer<typeof ChatMessageSchema>
 export type SceneState = z.infer<typeof SceneStateSchema>
@@ -125,6 +167,11 @@ export function emptySceneState(): SceneState {
     walls: [],
     doors: [],
     lights: [],
+    drawings: [],
+    labels: [],
+    tiles: [],
+    regions: [],
+    pings: [],
     vision: { dynamic: false, darkness: false, normalVisionFeet: 60 },
     audio: { url: null, volume: 0.5, loop: true },
     fog: { revealed: [] },
@@ -138,4 +185,8 @@ export const EventNames = {
   PresenceUpdated: 'PresenceUpdated',
 } as const
 
-export type Role = 'gm' | 'player'
+export type Role = 'gm' | 'assistant' | 'player' | 'observer'
+
+export function isManagerRole(role: Role | null | undefined): boolean {
+  return role === 'gm' || role === 'assistant'
+}

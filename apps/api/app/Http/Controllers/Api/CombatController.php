@@ -11,6 +11,7 @@ use App\Models\Combat;
 use App\Models\CombatParticipant;
 use App\Models\Scene;
 use App\Support\Dnd\AbilityScore;
+use App\Support\Dnd\ActiveEffectEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -18,6 +19,8 @@ use Illuminate\Validation\Rule;
 class CombatController extends Controller
 {
     use AuthorizesScene;
+
+    public function __construct(private readonly ActiveEffectEngine $effects) {}
 
     public function show(Request $request, Scene $scene): JsonResponse
     {
@@ -105,8 +108,10 @@ class CombatController extends Controller
         foreach ($combat->participants as $participant) {
             $dexMod = 0;
             if ($participant->actor) {
-                $score = (int) ($participant->actor->system['abilities']['dex']['score'] ?? 10);
+                $effectiveSystem = $this->effects->effectiveSystem($participant->actor);
+                $score = (int) ($effectiveSystem['abilities']['dex']['score'] ?? 10);
                 $dexMod = AbilityScore::modifier($score);
+                $dexMod += (int) round($this->effects->rollModifier($participant->actor->activeEffects()->get(), 'roll.initiative'));
             }
             $formula = $dexMod === 0 ? 'd20' : sprintf('d20%+d', $dexMod);
             $result = $dice->roll($formula);
@@ -141,6 +146,7 @@ class CombatController extends Controller
             if ($nextTurn >= $count) {
                 $nextTurn = 0;
                 $combat->round++;
+                $this->effects->advanceRound($combat);
             }
             $combat->turn = $nextTurn;
             $combat->save();

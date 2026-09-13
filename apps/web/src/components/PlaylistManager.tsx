@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api } from "../lib/api";
 import { updateScene } from "../lib/scene";
-import { useSession } from "../store/session";
+import { isManagerRole, useSession } from "../store/session";
 
 type Track = { id: number; title: string; url: string; volume: number; loop: boolean };
 type Playlist = { id: number; name: string; tracks: Track[] };
@@ -80,7 +80,7 @@ export function PlaylistManager() {
                   {Math.round(track.volume * 100)}%{track.loop ? " · repetir" : ""}
                 </small>
               </span>
-              {role === "gm" && (
+              {isManagerRole(role) && (
                 <>
                   <button
                     disabled={busy || !sceneId}
@@ -118,7 +118,7 @@ export function PlaylistManager() {
               )}
             </div>
           ))}
-          {role === "gm" && (
+          {isManagerRole(role) && (
             <form onSubmit={(event) => void addTrack(event, playlist.id)}>
               <label>
                 Faixa
@@ -141,7 +141,7 @@ export function PlaylistManager() {
           )}
         </section>
       ))}
-      {role === "gm" && (
+      {isManagerRole(role) && (
         <form onSubmit={create}>
           <label>
             Nova playlist

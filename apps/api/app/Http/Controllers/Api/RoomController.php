@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Campaign;
+use App\Models\CampaignMember;
+use App\Models\CampaignResourcePermission;
 use App\Models\Room;
 use App\Models\Scene;
 use App\Models\SceneMember;
@@ -83,6 +85,10 @@ class RoomController extends Controller
             'user_id' => $user->id,
             'role' => 'gm',
         ]);
+        CampaignMember::firstOrCreate(
+            ['campaign_id' => $campaign->id, 'user_id' => $user->id],
+            ['role' => 'gm', 'permissions' => []],
+        );
 
         return response()->json([
             'campaign' => $campaign,
@@ -104,11 +110,18 @@ class RoomController extends Controller
 
         $user = $request->user();
         $scenes = $room->campaign->scenes()->orderBy('id')->get();
-        $role = $room->campaign->owner_id === $user->id ? 'gm' : 'player';
+        $membership = CampaignMember::firstOrCreate(
+            ['campaign_id' => $room->campaign->id, 'user_id' => $user->id],
+            ['role' => $room->campaign->owner_id === $user->id ? 'gm' : 'player', 'permissions' => []],
+        );
+        $role = $room->campaign->owner_id === $user->id ? 'gm' : $membership->role;
         foreach ($scenes as $candidate) {
             SceneMember::firstOrCreate(['scene_id' => $candidate->id, 'user_id' => $user->id], ['role' => $role]);
         }
-        $scene = $scenes->first(fn ($candidate) => $role === 'gm' || $candidate->published) ?? abort(409, 'Aguarde o mestre publicar uma cena.');
+        $grantedSceneIds = CampaignResourcePermission::query()->where('campaign_id', $room->campaign->id)->where('user_id', $user->id)
+            ->where('resource_type', 'scene')->pluck('resource_id')->map(fn ($id) => (int) $id)->all();
+        $scene = $scenes->first(fn ($candidate) => in_array($role, ['gm', 'assistant'], true) || $candidate->published || in_array($candidate->id, $grantedSceneIds, true))
+            ?? abort(409, 'Aguarde o mestre publicar uma cena.');
 
         return response()->json([
             'campaign' => $room->campaign,
@@ -126,6 +139,7 @@ class RoomController extends Controller
             'id' => $scene->id,
             'name' => $scene->name,
             'role' => $role,
+            'canEdit' => $role !== 'observer' && ($scene->campaign->canManage($user) || CampaignResourcePermission::permits($scene->campaign, $user, 'scene', $scene->id, 'edit')),
             'state' => $scene->stateFor($user),
             'backgroundUrl' => $scene->background_path
                 ? url('storage/'.$scene->background_path)

@@ -2,15 +2,16 @@
 
 namespace Tests\Unit;
 
+use App\Game\Dice\DiceRoller;
 use PHPUnit\Framework\TestCase;
 
 class ExampleTest extends TestCase
 {
-    /**
-     * A basic test example.
-     */
-    public function test_that_true_is_true(): void
+    public function test_dice_roller_reports_a_bounded_d20_result(): void
     {
-        $this->assertTrue(true);
+        $result = (new DiceRoller)->roll('d20');
+
+        $this->assertGreaterThanOrEqual(1, $result['total']);
+        $this->assertLessThanOrEqual(20, $result['total']);
     }
 }

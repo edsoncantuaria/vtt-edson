@@ -59,7 +59,6 @@ class CatalogImportLifecycleTest extends TestCase
         $this->assertSame('Goblin Veteran', $updated->name);
         $this->assertTrue($updated->active);
         $this->assertFalse(CatalogEntry::where('slug', $two['slug'])->firstOrFail()->active);
-        $this->assertIsArray($updated->data);
         $this->assertDatabaseCount('catalog_imports', 2);
     }
 

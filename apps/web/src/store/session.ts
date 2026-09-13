@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Actor, Combat, Role, SceneState } from "@vtt/core";
+export { isManagerRole } from "@vtt/core";
 import { emptySceneState, SceneStateSchema, ActorSchema } from "@vtt/core";
 import { publicAssetUrl } from "../lib/assets";
 export type Tool =
@@ -14,8 +15,12 @@ export type Tool =
   | "circle"
   | "cone"
   | "line"
-  | "radius";
-export type Panel = "chat" | "actors" | "compendium" | "combat" | "scene" | "journal";
+  | "radius"
+  | "draw"
+  | "label"
+  | "ping"
+  | "region";
+export type Panel = "chat" | "actors" | "compendium" | "combat" | "scene" | "journal" | "tools";
 export type Ruleset = "5e-2014" | "5e-2024";
 export type User = { id: number; name: string; email: string };
 export type RoomResult = {
@@ -25,6 +30,7 @@ export type RoomResult = {
     id: number;
     name: string;
     role: Role;
+    canEdit?: boolean;
     state: SceneState;
     backgroundUrl: string | null;
   };
@@ -51,6 +57,7 @@ const sceneDefaults = () => ({
   sceneId: null as number | null,
   sceneName: "",
   role: null as Role | null,
+  canEditScene: false,
   state: emptySceneState(),
   backgroundUrl: null as string | null,
   tool: "select" as Tool,
@@ -97,6 +104,7 @@ export const useSession = create<Session>((set) => ({
       sceneId: scene.id,
       sceneName: scene.name,
       role: scene.role,
+      canEditScene: scene.canEdit ?? (scene.role === "gm" || scene.role === "assistant"),
       state: SceneStateSchema.parse(scene.state),
       backgroundUrl: publicAssetUrl(scene.backgroundUrl),
       panel: scene.role === "player" ? "actors" : "chat",
@@ -106,6 +114,7 @@ export const useSession = create<Session>((set) => ({
       sceneId: scene.id,
       sceneName: scene.name,
       role: scene.role,
+      canEditScene: scene.canEdit ?? (scene.role === "gm" || scene.role === "assistant"),
       state: SceneStateSchema.parse(scene.state),
       backgroundUrl: publicAssetUrl(scene.backgroundUrl),
       tool: "select",

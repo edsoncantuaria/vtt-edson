@@ -3,6 +3,7 @@ import type { Panel, SceneSummary } from "../../store/session";
 import { ActorSheet } from "../ActorSheet";
 import { ChatPanel } from "../ChatPanel";
 import { CombatTracker } from "../CombatTracker";
+import { CampaignToolsPanel } from "../CampaignToolsPanel";
 import { Compendium } from "../Compendium";
 import { Icon } from "../Icon";
 import { JournalPanel } from "../JournalPanel";
@@ -15,6 +16,7 @@ function panelTitle(panel: Panel, gm: boolean): string {
   if (panel === "chat") return "Conversa da mesa";
   if (panel === "combat") return "Ordem de iniciativa";
   if (panel === "journal") return "Diário da campanha";
+  if (panel === "tools") return "Ferramentas da campanha";
   return "Compêndio";
 }
 
@@ -23,6 +25,7 @@ function panelMeta(panel: Panel, gm: boolean, actorCount: number): string {
   if (panel === "actors") return `${actorCount} FICHAS`;
   if (panel === "compendium") return "2014 · 2024";
   if (panel === "journal") return "COMPARTILHADO";
+  if (panel === "tools") return "ASSETS · MACROS · ACESSO";
   return gm ? "MESTRE" : "JOGADOR";
 }
 
@@ -72,6 +75,7 @@ export function SessionPanel({
         {panel === "combat" && <CombatTracker />}
         {panel === "compendium" && <Compendium />}
         {panel === "journal" && <JournalPanel />}
+        {panel === "tools" && <CampaignToolsPanel center={center} />}
         {panel === "scene" && gm && (
           <ScenePanel
             uploading={uploading}

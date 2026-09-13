@@ -71,6 +71,6 @@ class LootController extends Controller
 
     private function gm(Request $request, Campaign $campaign): void
     {
-        abort_unless($campaign->roleFor($request->user()) === 'gm', 403, 'Apenas o GM pode gerenciar tesouro.');
+        abort_unless($campaign->canManage($request->user()), 403, 'Apenas o GM pode gerenciar tesouro.');
     }
 }

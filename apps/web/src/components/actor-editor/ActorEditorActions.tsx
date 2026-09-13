@@ -1,12 +1,20 @@
-import { ABILITY_LABELS, DAMAGE_LABELS, type ActorAction, type ActorSystem } from "@vtt/core";
+import {
+  ABILITY_LABELS,
+  DAMAGE_LABELS,
+  type ActorAction,
+  type ActorDocument,
+  type ActorSystem,
+} from "@vtt/core";
 import { Icon } from "../Icon";
 import type { MutateActorSystem } from "./ActorEditorFields";
 
 export function ActionsSection({
   system,
+  documents,
   mutate,
 }: {
   system: ActorSystem;
+  documents: ActorDocument[];
   mutate: MutateActorSystem;
 }) {
   return (
@@ -122,15 +130,35 @@ export function ActionsSection({
           Adicionar recurso
         </button>
       </details>
-      {system.actions.map((action, index) => (
-        <ActionEditor
-          key={action.id}
-          action={action}
-          index={index}
-          system={system}
-          mutate={mutate}
-        />
-      ))}
+      {system.actions.some((action) => action.id.startsWith("document:")) && (
+        <details>
+          <summary>Ações automáticas dos documentos</summary>
+          <p className="panel-hint">
+            Estas ações são derivadas do 5e.tools/documento canônico. Edite ou remova o documento de
+            origem para alterá-las.
+          </p>
+          {system.actions
+            .filter((action) => action.id.startsWith("document:"))
+            .map((action) => (
+              <p key={action.id}>
+                <b>{action.name}</b> ·{" "}
+                {action.attackFormula ?? action.damageFormula ?? "efeito/salvaguarda"}
+              </p>
+            ))}
+        </details>
+      )}
+      {system.actions.map((action, index) =>
+        action.id.startsWith("document:") ? null : (
+          <ActionEditor
+            key={action.id}
+            action={action}
+            index={index}
+            system={system}
+            documents={documents}
+            mutate={mutate}
+          />
+        ),
+      )}
       <button
         type="button"
         onClick={() =>
@@ -155,11 +183,13 @@ function ActionEditor({
   action,
   index,
   system,
+  documents,
   mutate,
 }: {
   action: ActorAction;
   index: number;
   system: ActorSystem;
+  documents: ActorDocument[];
   mutate: MutateActorSystem;
 }) {
   return (
@@ -394,6 +424,246 @@ function ActionEditor({
           </label>
         )}
       </div>
+      <div className="editor-grid">
+        <label>
+          Consumir cargas de item/documento
+          <select
+            value={action.documentId ?? ""}
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].documentId = event.target.value
+                  ? Number(event.target.value)
+                  : undefined;
+                next.actions[index].chargeCost = event.target.value
+                  ? (next.actions[index].chargeCost ?? 1)
+                  : undefined;
+              })
+            }
+          >
+            <option value="">Sem consumo de cargas</option>
+            {documents
+              .filter((document) => document.charges)
+              .map((document) => (
+                <option value={document.id} key={document.id}>
+                  {document.name} · {document.charges?.value}/{document.charges?.max}
+                </option>
+              ))}
+          </select>
+        </label>
+        {action.documentId && (
+          <label>
+            Cargas gastas
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              value={action.chargeCost ?? 1}
+              onChange={(event) =>
+                mutate((next) => {
+                  next.actions[index].chargeCost = Math.max(1, Number(event.target.value));
+                })
+              }
+            />
+          </label>
+        )}
+      </div>
+      <details>
+        <summary>Efeito automático da ação</summary>
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={!!action.effect}
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].effect = event.target.checked
+                  ? {
+                      name: next.actions[index].name,
+                      target: "targets",
+                      trigger: "on-use",
+                      duration: { unit: "rounds", remaining: 1 },
+                      modifiers: [],
+                      conditions: [],
+                    }
+                  : undefined;
+              })
+            }
+          />
+          Aplicar Active Effect ao executar
+        </label>
+        {action.effect && (
+          <div className="editor-grid">
+            <label>
+              Nome do efeito
+              <input
+                value={action.effect.name}
+                onChange={(event) =>
+                  mutate((next) => {
+                    if (next.actions[index].effect)
+                      next.actions[index].effect.name = event.target.value;
+                  })
+                }
+              />
+            </label>
+            <label>
+              Alvo
+              <select
+                value={action.effect.target}
+                onChange={(event) =>
+                  mutate((next) => {
+                    if (next.actions[index].effect)
+                      next.actions[index].effect.target = event.target.value as "self" | "targets";
+                  })
+                }
+              >
+                <option value="targets">Alvos selecionados no mapa</option>
+                <option value="self">A própria ficha</option>
+              </select>
+            </label>
+            <label>
+              Momento
+              <select
+                value={action.effect.trigger}
+                onChange={(event) =>
+                  mutate((next) => {
+                    if (next.actions[index].effect)
+                      next.actions[index].effect.trigger = event.target.value as
+                        | "on-use"
+                        | "on-hit"
+                        | "on-failed-save";
+                  })
+                }
+              >
+                <option value="on-use">Ao usar</option>
+                <option value="on-hit">Ao acertar</option>
+                <option value="on-failed-save">Quando o alvo falhar no save</option>
+              </select>
+            </label>
+            <label>
+              Duração
+              <select
+                value={action.effect.duration.unit}
+                onChange={(event) =>
+                  mutate((next) => {
+                    if (next.actions[index].effect) {
+                      next.actions[index].effect.duration.unit = event.target
+                        .value as ActorAction["effect"] extends infer E
+                        ? E extends { duration: { unit: infer U } }
+                          ? U
+                          : never
+                        : never;
+                    }
+                  })
+                }
+              >
+                <option value="rounds">Rodadas</option>
+                <option value="minutes">Minutos</option>
+                <option value="hours">Horas</option>
+                <option value="until-short-rest">Até descanso curto</option>
+                <option value="until-long-rest">Até descanso longo</option>
+                <option value="permanent">Permanente</option>
+              </select>
+            </label>
+            {["rounds", "minutes", "hours"].includes(action.effect.duration.unit) && (
+              <label>
+                Restante
+                <input
+                  type="number"
+                  min={0}
+                  value={action.effect.duration.remaining ?? 1}
+                  onChange={(event) =>
+                    mutate((next) => {
+                      if (next.actions[index].effect)
+                        next.actions[index].effect.duration.remaining = Math.max(
+                          0,
+                          Number(event.target.value),
+                        );
+                    })
+                  }
+                />
+              </label>
+            )}
+            <label>
+              Condição opcional
+              <input
+                value={action.effect.conditions[0] ?? ""}
+                placeholder="poisoned"
+                onChange={(event) =>
+                  mutate((next) => {
+                    if (!next.actions[index].effect) return;
+                    next.actions[index].effect.conditions = event.target.value
+                      ? [event.target.value]
+                      : [];
+                  })
+                }
+              />
+            </label>
+            <label>
+              Modificador
+              <select
+                value={action.effect.modifiers[0]?.path ?? ""}
+                onChange={(event) =>
+                  mutate((next) => {
+                    if (!next.actions[index].effect) return;
+                    next.actions[index].effect.modifiers = event.target.value
+                      ? [{ path: event.target.value, mode: "add", value: 1 }]
+                      : [];
+                  })
+                }
+              >
+                <option value="">Sem modificador numérico</option>
+                <option value="ac">Classe de Armadura</option>
+                <option value="speed">Deslocamento</option>
+                <option value="roll.attack">Ataques</option>
+                <option value="roll.damage">Dano</option>
+                <option value="roll.save">Salvaguardas</option>
+                <option value="roll.initiative">Iniciativa</option>
+                <option value="spell.saveDc">CD de magia</option>
+              </select>
+            </label>
+            {action.effect.modifiers[0] && (
+              <>
+                <label>
+                  Operação
+                  <select
+                    value={action.effect.modifiers[0].mode}
+                    onChange={(event) =>
+                      mutate((next) => {
+                        if (next.actions[index].effect?.modifiers[0])
+                          next.actions[index].effect.modifiers[0].mode = event.target.value as
+                            | "add"
+                            | "multiply"
+                            | "override";
+                      })
+                    }
+                  >
+                    <option value="add">Somar</option>
+                    <option value="multiply">Multiplicar</option>
+                    <option value="override">Substituir</option>
+                  </select>
+                </label>
+                <label>
+                  Valor
+                  <input
+                    value={action.effect.modifiers[0].value}
+                    placeholder="1 ou d4"
+                    onChange={(event) =>
+                      mutate((next) => {
+                        if (!next.actions[index].effect?.modifiers[0]) return;
+                        const raw = event.target.value.trim();
+                        next.actions[index].effect.modifiers[0].value = /^[-+]?\d+(?:\.\d+)?$/.test(
+                          raw,
+                        )
+                          ? Number(raw)
+                          : raw;
+                      })
+                    }
+                  />
+                </label>
+              </>
+            )}
+          </div>
+        )}
+      </details>
       <label>
         URL do GIF/efeito (HTTPS)
         <input

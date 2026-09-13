@@ -7,7 +7,6 @@ import {
   type ActorSystem,
   type SkillKey,
 } from "@vtt/core";
-import { Icon } from "../Icon";
 import { EditorSection, NumberField, type MutateActorSystem } from "./ActorEditorFields";
 
 export function EssentialsSection({
@@ -332,67 +331,6 @@ export function StorySection({
           }
         />
       </label>
-      <EditorSection title="Talentos e características">
-        <>
-          {system.features.map((feature, index) => (
-            <section className="editor-item" key={feature.id}>
-              <div className="editor-item__head">
-                <label>
-                  Nome
-                  <input
-                    required
-                    value={feature.name}
-                    onChange={(event) =>
-                      mutate((next) => {
-                        next.features[index].name = event.target.value;
-                      })
-                    }
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="icon-button danger"
-                  aria-label={`Remover ${feature.name}`}
-                  onClick={() =>
-                    mutate((next) => {
-                      next.features.splice(index, 1);
-                    })
-                  }
-                >
-                  <Icon name="trash" size={16} />
-                </button>
-              </div>
-              <label>
-                Descrição
-                <textarea
-                  rows={3}
-                  value={feature.description ?? ""}
-                  onChange={(event) =>
-                    mutate((next) => {
-                      next.features[index].description = event.target.value;
-                    })
-                  }
-                />
-              </label>
-            </section>
-          ))}
-          <button
-            type="button"
-            onClick={() =>
-              mutate((next) => {
-                next.features.push({
-                  id: crypto.randomUUID(),
-                  name: "Nova característica",
-                  description: "",
-                });
-              })
-            }
-          >
-            <Icon name="plus" size={16} />
-            Adicionar característica
-          </button>
-        </>
-      </EditorSection>
     </>
   );
 }

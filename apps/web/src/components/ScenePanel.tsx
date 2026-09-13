@@ -1,4 +1,4 @@
-import type { SceneState } from "@vtt/core";
+import type { Role, SceneState } from "@vtt/core";
 import { useState, type FormEvent } from "react";
 import { api } from "../lib/api";
 import { campaignBackupFilename, downloadCampaignBackup } from "../lib/campaignBackup";
@@ -29,7 +29,7 @@ type SceneChoice = {
   id: number;
   published?: boolean;
   name: string;
-  role: "gm" | "player";
+  role: Role;
   state: SceneState;
   backgroundUrl: string | null;
 };

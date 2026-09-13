@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property-read Collection<int, Scene> $scenes
  * @property-read Collection<int, Actor> $actors
  * @property-read Collection<int, Journal> $journals
+ * @property-read Collection<int, CampaignMember> $members
  */
 class Campaign extends Model
 {
@@ -60,11 +61,22 @@ class Campaign extends Model
         return $this->hasMany(Journal::class);
     }
 
+    /** @return HasMany<CampaignMember, $this> */
+    public function members(): HasMany
+    {
+        return $this->hasMany(CampaignMember::class);
+    }
+
     /** GM é o dono da campanha; jogador é quem tem SceneMember em alguma cena dela. */
     public function roleFor(User $user): ?string
     {
         if ((int) $this->owner_id === (int) $user->id) {
             return 'gm';
+        }
+
+        $membership = $this->members()->where('user_id', $user->id)->first();
+        if ($membership) {
+            return $membership->role;
         }
 
         $isPlayer = SceneMember::query()
@@ -73,6 +85,28 @@ class Campaign extends Model
             ->exists();
 
         return $isPlayer ? 'player' : null;
+    }
+
+    public function canManage(User $user): bool
+    {
+        return in_array($this->roleFor($user), ['gm', 'assistant'], true);
+    }
+
+    public function can(User $user, string $capability): bool
+    {
+        if ((int) $this->owner_id === (int) $user->id) {
+            return true;
+        }
+        $member = $this->members()->where('user_id', $user->id)->first();
+        if (! $member) {
+            return false;
+        }
+        if ($member->role === 'assistant') {
+            return $capability !== 'campaign-owner';
+        }
+        $permissions = $member->permissions ?? [];
+
+        return in_array($capability, $permissions, true);
     }
 
     public function isMember(User $user): bool

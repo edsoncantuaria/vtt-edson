@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Actor;
 use App\Models\Campaign;
+use App\Models\CampaignResourcePermission;
+use App\Support\Dnd\ActorDocumentService;
 use App\Support\Dnd\ActorStateFactory;
 use App\Support\Dnd\ActorSystemValidator;
 use Illuminate\Http\JsonResponse;
@@ -13,13 +15,27 @@ use Illuminate\Support\Facades\DB;
 
 class ActorController extends Controller
 {
-    public function __construct(private readonly ActorSystemValidator $systemValidator) {}
+    public function __construct(
+        private readonly ActorSystemValidator $systemValidator,
+        private readonly ActorDocumentService $documents,
+    ) {}
 
     public function index(Request $request, Campaign $campaign): JsonResponse
     {
         $this->requireMember($request, $campaign);
 
-        return response()->json(['actors' => $campaign->actors()->when($campaign->roleFor($request->user()) !== 'gm', fn ($query) => $query->where(fn ($q) => $q->where('owner_user_id', $request->user()->id)->orWhere('shared', true)))->orderBy('name')->get()->map->toPayload()]);
+        $granted = CampaignResourcePermission::query()
+            ->where('campaign_id', $campaign->id)
+            ->where('user_id', $request->user()->id)
+            ->where('resource_type', 'actor')
+            ->pluck('resource_id');
+
+        return response()->json(['actors' => $campaign->actors()
+            ->when(! $campaign->canManage($request->user()), fn ($query) => $query->where(fn ($q) => $q
+                ->where('owner_user_id', $request->user()->id)
+                ->orWhere('shared', true)
+                ->orWhereIn('id', $granted)))
+            ->with(['documents', 'activeEffects'])->orderBy('name')->get()->map->toPayload()]);
     }
 
     public function store(Request $request, Campaign $campaign): JsonResponse
@@ -34,7 +50,10 @@ class ActorController extends Controller
             'system' => ['nullable', 'array'],
         ]);
 
-        if ($role !== 'gm') {
+        if ($role === 'observer') {
+            abort(403, 'Observadores possuem acesso somente de leitura.');
+        }
+        if (! $campaign->canManage($request->user())) {
             // Jogador só pode criar personagem próprio.
             if ($data['type'] !== 'character') {
                 abort(403, 'Apenas o GM pode criar NPCs e monstros.');
@@ -54,14 +73,17 @@ class ActorController extends Controller
             'name' => $data['name'],
             'system' => $system,
         ]);
+        $this->documents->syncFromLegacy($actor);
+        $this->documents->syncLegacy($actor);
 
-        return response()->json(['actor' => $actor->toPayload()], 201);
+        return response()->json(['actor' => $actor->fresh()->toPayload()], 201);
     }
 
     public function show(Request $request, Actor $actor): JsonResponse
     {
         $role = $this->requireMember($request, $actor->campaign);
-        abort_unless($role === 'gm' || $actor->isOwnedBy($request->user()) || $actor->shared, 403);
+        abort_unless($actor->campaign->canManage($request->user()) || $actor->isOwnedBy($request->user()) || $actor->shared
+            || CampaignResourcePermission::permits($actor->campaign, $request->user(), 'actor', $actor->id), 403);
 
         return response()->json(['actor' => $actor->toPayload()]);
     }
@@ -83,13 +105,21 @@ class ActorController extends Controller
                 $actor->system = $data['system'];
             }
             if (array_key_exists('shared', $data)) {
-                abort_unless($actor->campaign->roleFor($request->user()) === 'gm', 403);
+                abort_unless($actor->campaign->canManage($request->user()), 403);
                 $actor->shared = $data['shared'];
             }
             if (isset($data['name'])) {
                 $actor->name = $data['name'];
             }
             $actor->save();
+            if (isset($data['system'])) {
+                if ($actor->documents()->exists()) {
+                    $this->documents->syncLegacy($actor);
+                } else {
+                    $this->documents->syncFromLegacy($actor);
+                    $this->documents->syncLegacy($actor);
+                }
+            }
 
             return response()->json(['actor' => $actor->toPayload()]);
         });
@@ -117,7 +147,8 @@ class ActorController extends Controller
     public function export(Request $request, Actor $actor): JsonResponse
     {
         $role = $this->requireMember($request, $actor->campaign);
-        abort_unless($role === 'gm' || $actor->isOwnedBy($request->user()) || $actor->shared, 403);
+        abort_unless($actor->campaign->canManage($request->user()) || $actor->isOwnedBy($request->user()) || $actor->shared
+            || CampaignResourcePermission::permits($actor->campaign, $request->user(), 'actor', $actor->id), 403);
 
         return response()->json([
             'type' => $actor->type,
@@ -139,10 +170,14 @@ class ActorController extends Controller
     private function requireEditRights(Request $request, Actor $actor): void
     {
         $role = $this->requireMember($request, $actor->campaign);
-        if ($role === 'gm') {
+        if ($actor->campaign->canManage($request->user())) {
             return;
         }
-        if (! $actor->isOwnedBy($request->user())) {
+        if ($role === 'observer') {
+            abort(403, 'Observadores possuem acesso somente de leitura.');
+        }
+        if (! $actor->isOwnedBy($request->user())
+            && ! CampaignResourcePermission::permits($actor->campaign, $request->user(), 'actor', $actor->id, 'edit')) {
             abort(403, 'Você só pode editar suas próprias fichas.');
         }
     }

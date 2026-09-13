@@ -1,5 +1,6 @@
 import type { Actor, ActorSystem } from "@vtt/core";
 import { Icon } from "../Icon";
+import { ActorEffectsTab } from "./ActorEffectsTab";
 import { ActionsTab, AttributesTab, EquipmentTab, SpellsTab, StoryTab } from "./ActorSheetTabs";
 import { ACTOR_SHEET_TABS, type ActorSheetTab } from "./actorSheetTypes";
 
@@ -210,6 +211,7 @@ export function ActorQuickSheet({
       {tab === "Magias" && (
         <SpellsTab actor={actor} canEdit={canEdit} busy={busy} change={change} />
       )}
+      {tab === "Efeitos" && <ActorEffectsTab actor={actor} canEdit={canEdit} />}
       {tab === "História" && <StoryTab actor={actor} canEdit={canEdit} onDelete={onDelete} />}
     </>
   );

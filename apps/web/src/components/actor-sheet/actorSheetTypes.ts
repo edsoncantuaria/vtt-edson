@@ -3,6 +3,7 @@ export const ACTOR_SHEET_TABS = [
   "Ações",
   "Equipamento",
   "Magias",
+  "Efeitos",
   "História",
 ] as const;
 

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Campaign;
 use App\Models\RollTable;
 use App\Models\RollTableRoll;
+use App\Support\FiveToolsIntegrationService;
 use App\Support\RollTableExecutor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,7 +18,7 @@ class RollTableController extends Controller
     {
         abort_unless($campaign->isMember($request->user()), 403);
         $query = RollTable::where('campaign_id', $campaign->id)->orderBy('name');
-        if ($campaign->roleFor($request->user()) !== 'gm') {
+        if (! $campaign->canManage($request->user())) {
             $query->where('enabled', true);
         }
 
@@ -40,16 +41,21 @@ class RollTableController extends Controller
         return response()->json(['table' => $rollTable->fresh()]);
     }
 
-    public function roll(Request $request, RollTable $rollTable, RollTableExecutor $executor): JsonResponse
+    public function roll(Request $request, RollTable $rollTable, RollTableExecutor $executor, FiveToolsIntegrationService $integration): JsonResponse
     {
         abort_unless($rollTable->campaign->isMember($request->user()), 403);
+        abort_if($rollTable->campaign->roleFor($request->user()) === 'observer', 403, 'Observadores possuem acesso somente de leitura.');
+        if (data_get($rollTable->metadata, 'fiveTools.gmOnly')) {
+            abort_unless($rollTable->campaign->canManage($request->user()), 403, 'Esta tabela integrada é uma ferramenta do mestre.');
+        }
         $result = $executor->execute($rollTable);
         $record = RollTableRoll::create([
             'roll_table_id' => $rollTable->id, 'user_id' => $request->user()->id,
             'total' => $result['roll']['total'], 'result' => $result,
         ]);
+        $materialized = $integration->materializeRoll($rollTable, $record, $result['entry']);
 
-        return response()->json(['record' => $record, ...$result]);
+        return response()->json(['record' => $record, ...$result, ...$materialized]);
     }
 
     public function destroy(Request $request, RollTable $rollTable): JsonResponse
@@ -81,6 +87,6 @@ class RollTableController extends Controller
 
     private function gm(Request $request, Campaign $campaign): void
     {
-        abort_unless($campaign->roleFor($request->user()) === 'gm', 403, 'Apenas o GM pode editar tabelas.');
+        abort_unless($campaign->canManage($request->user()), 403, 'Apenas o GM pode editar tabelas.');
     }
 }

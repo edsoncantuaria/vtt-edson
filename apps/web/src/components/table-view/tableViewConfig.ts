@@ -102,6 +102,37 @@ export const TABLE_TOOLS: ToolDefinition[] = [
     key: "A",
     hint: "Arraste um raio a partir da origem e selecione os alvos no alcance.",
   },
+  {
+    id: "draw",
+    label: "Desenhar",
+    icon: "cursor",
+    key: "D",
+    hint: "Desenhe livremente sobre o mapa. O traço fica salvo na cena.",
+    gm: true,
+  },
+  {
+    id: "label",
+    label: "Texto",
+    icon: "journal",
+    key: "X",
+    hint: "Clique no mapa e escreva um rótulo persistente.",
+    gm: true,
+  },
+  {
+    id: "region",
+    label: "Região",
+    icon: "map",
+    key: "G",
+    hint: "Arraste uma região para marcar terreno, perigo ou gatilho.",
+    gm: true,
+  },
+  {
+    id: "ping",
+    label: "Ping",
+    icon: "token",
+    key: "Q",
+    hint: "Clique para apontar um local para toda a mesa.",
+  },
 ];
 
 export const SESSION_PANELS: PanelDefinition[] = [
@@ -110,4 +141,5 @@ export const SESSION_PANELS: PanelDefinition[] = [
   { id: "combat", label: "Combate", icon: "swords" },
   { id: "compendium", label: "Biblioteca", icon: "book" },
   { id: "journal", label: "Diário", icon: "journal" },
+  { id: "tools", label: "Ferramentas", icon: "settings" },
 ];

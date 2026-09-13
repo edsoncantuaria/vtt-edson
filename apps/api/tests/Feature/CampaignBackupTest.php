@@ -31,7 +31,7 @@ class CampaignBackupTest extends TestCase
         return $this->postJson('/api/rooms', ['name' => 'Backup'])->assertCreated()->json();
     }
 
-    public function test_v2_backup_is_portable_sanitizes_external_ids_and_restores_domain_references(): void
+    public function test_v3_backup_is_portable_sanitizes_external_ids_and_restores_domain_references(): void
     {
         Storage::fake('public');
         $room = $this->room();
@@ -72,7 +72,7 @@ class CampaignBackupTest extends TestCase
         LootResult::create(['campaign_id' => $campaignId, 'roll_table_roll_id' => $roll->id, 'name' => 'Baú', 'items' => [], 'currency' => ['gp' => 10], 'metadata' => [], 'status' => 'applied', 'applied_actor_id' => $actor->id, 'applied_at' => now()]);
 
         $archive = $this->getJson('/api/campaigns/'.$campaignId.'/export')->assertOk()->json();
-        $this->assertSame(2, $archive['version']);
+        $this->assertSame(3, $archive['version']);
         $this->assertArrayNotHasKey('id', $archive['campaign']);
         $this->assertArrayNotHasKey('ownerUserId', $archive['actors'][0]);
         $this->assertArrayNotHasKey('campaignId', $archive['actors'][0]);

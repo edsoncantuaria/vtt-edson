@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSession, type Panel, type SceneSummary } from "../store/session";
+import { isManagerRole, useSession, type Panel, type SceneSummary } from "../store/session";
 import { updateScene } from "../lib/scene";
 import { useSceneSync } from "../lib/useSceneSync";
 import { Icon } from "./Icon";
 import { DiceTray } from "./DiceTray";
 import { AmbiencePlayer } from "./AmbiencePlayer";
 import { api } from "../lib/api";
+import { pluginRegistry } from "../lib/plugins";
 import { HelpDialog, InviteDialog } from "./table-view/TableDialogs";
 import { TableFooter } from "./table-view/TableFooter";
 import { TableHeader } from "./table-view/TableHeader";
 import { SessionPanel } from "./table-view/SessionPanel";
 import { TABLE_TOOLS } from "./table-view/tableViewConfig";
 import { ToolRail } from "./table-view/ToolRail";
+import { MacroHotbar } from "./table-view/MacroHotbar";
+import { CanvasObjectInspector } from "./table-view/CanvasObjectInspector";
 import { useVttTable } from "./table-view/useVttTable";
 import "./TableView.css";
 
@@ -23,6 +26,7 @@ export function TableView() {
     campaignId,
     roomCode,
     role,
+    canEditScene,
     state,
     backgroundUrl,
     tool,
@@ -48,8 +52,12 @@ export function TableView() {
   const [tokenActor, setTokenActor] = useState("");
   const [scenes, setScenes] = useState<SceneSummary[]>([]);
   const connection = useSceneSync();
-  const gm = role === "gm";
-  const availableTools = useMemo(() => TABLE_TOOLS.filter((item) => !item.gm || gm), [gm]);
+  const gm = isManagerRole(role);
+  const sceneEditor = gm || canEditScene;
+  const availableTools = useMemo(
+    () => TABLE_TOOLS.filter((item) => !item.gm || sceneEditor),
+    [sceneEditor],
+  );
   const activeTool = TABLE_TOOLS.find((item) => item.id === tool)!;
   const report = useCallback(
     (e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível concluir a ação."),
@@ -86,6 +94,7 @@ export function TableView() {
     try {
       const result = await api<{ scene: SceneSummary }>(`/scenes/${id}`);
       enterScene(result.scene);
+      await pluginRegistry.hooks.emit("scene:entered", { sceneId: id });
     } catch (error) {
       report(error);
     }
@@ -94,15 +103,26 @@ export function TableView() {
     setPanel(next);
     setPanelOpen(true);
   }
-  const { host, table, zoom, selectedTokenIds, lastTemplate, preparing, effect, dismissEffect } =
-    useVttTable({
-      sceneId,
-      role,
-      userId: user?.id,
-      tokenActorId: tokenActor,
-      report,
-      onActorPanelOpen: useCallback(() => setPanelOpen(true), []),
-    });
+  const {
+    host,
+    table,
+    zoom,
+    selectedTokenIds,
+    lastTemplate,
+    preparing,
+    effect,
+    dismissEffect,
+    selectedCanvasObject,
+    selectCanvasObject,
+  } = useVttTable({
+    sceneId,
+    role,
+    userId: user?.id,
+    tokenActorId: tokenActor,
+    canEditScene: sceneEditor,
+    report,
+    onActorPanelOpen: useCallback(() => setPanelOpen(true), []),
+  });
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (
@@ -227,13 +247,15 @@ export function TableView() {
               <span className="empty-symbol">
                 <Icon name="map" size={34} />
               </span>
-              <h2>{gm ? "Dê vida ao seu mundo." : "A aventura está prestes a começar."}</h2>
+              <h2>
+                {sceneEditor ? "Dê vida ao seu mundo." : "A aventura está prestes a começar."}
+              </h2>
               <p>
-                {gm
-                  ? "Adicione um mapa, prepare os personagens e convide seu grupo. A mesa é sua."
+                {sceneEditor
+                  ? "Adicione um mapa e prepare os objetos desta cena."
                   : "Prepare sua ficha enquanto o mestre organiza a cena."}
               </p>
-              {gm ? (
+              {sceneEditor ? (
                 <button
                   className="primary"
                   disabled={uploading}
@@ -249,13 +271,13 @@ export function TableView() {
                 </button>
               )}
               <small>
-                {gm
+                {sceneEditor
                   ? "JPG, PNG ou WebP · até 10 MB"
                   : "As áreas aparecem conforme o mestre as revela."}
               </small>
             </div>
           )}
-          {tool === "token" && gm && (
+          {tool === "token" && sceneEditor && (
             <div className="token-picker">
               <label>
                 Colocar no mapa
@@ -341,6 +363,17 @@ export function TableView() {
               </button>
             </div>
           )}
+          {sceneId && selectedCanvasObject && sceneEditor && (
+            <CanvasObjectInspector
+              key={`${selectedCanvasObject.kind}:${selectedCanvasObject.id}`}
+              sceneId={sceneId}
+              state={state}
+              selection={selectedCanvasObject}
+              onClear={() => selectCanvasObject(null)}
+              onError={report}
+            />
+          )}
+          <MacroHotbar center={() => table.current?.centerPoint() ?? { x: 350, y: 350 }} />
           <AmbiencePlayer />
         </section>
         {panelOpen && (

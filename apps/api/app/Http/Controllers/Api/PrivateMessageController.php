@@ -32,7 +32,7 @@ class PrivateMessageController extends Controller
 
     public function store(Request $request, Scene $scene, DiceRoller $dice): JsonResponse
     {
-        $this->requireMember($request, $scene);
+        $this->requireParticipant($request, $scene);
         $data = $request->validate([
             'recipientUserId' => ['nullable', 'integer', 'exists:users,id'],
             'audience' => ['sometimes', 'in:user,gm'],

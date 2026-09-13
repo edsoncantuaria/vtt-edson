@@ -62,6 +62,16 @@ export function EncounterBuilder() {
     ]).catch((e) => setMessage(e.message));
   }, [campaignId, sceneId, refresh]);
   useEffect(() => {
+    const changed = () =>
+      void refresh().catch((error) =>
+        setMessage(
+          error instanceof Error ? error.message : "Não foi possível atualizar os encontros.",
+        ),
+      );
+    window.addEventListener("vtt:encounters-changed", changed);
+    return () => window.removeEventListener("vtt:encounters-changed", changed);
+  }, [refresh]);
+  useEffect(() => {
     if (!campaignId) return;
     const controller = new AbortController();
     const timer = window.setTimeout(

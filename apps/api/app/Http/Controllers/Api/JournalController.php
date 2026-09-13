@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Campaign;
+use App\Models\CampaignResourcePermission;
 use App\Models\Journal;
-use App\Models\SceneMember;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,23 +17,26 @@ class JournalController extends Controller
     {
         $role = $this->role($request, $campaign);
         $entries = $campaign->journals()->latest('updated_at')->get();
-        if ($role !== 'gm') {
+        if (! $campaign->canManage($request->user())) {
             $userId = (int) $request->user()->id;
+            $grantedIds = CampaignResourcePermission::query()
+                ->where('campaign_id', $campaign->id)
+                ->where('user_id', $userId)
+                ->where('resource_type', 'journal')
+                ->pluck('resource_id')->map(fn ($id) => (int) $id)->all();
             $entries = $entries->filter(fn (Journal $journal) => $journal->visibility === 'all'
                 || ($journal->visibility === 'selected' && in_array($userId, array_map('intval', $journal->shared_user_ids ?? []), true))
+                || in_array($journal->id, $grantedIds, true)
             )->values();
         }
 
         $shareTargets = [];
-        if ($role === 'gm') {
-            $shareTargets = SceneMember::query()
-                ->whereIn('scene_id', $campaign->scenes()->pluck('id'))
-                ->where('role', 'player')
+        if ($campaign->canManage($request->user())) {
+            $shareTargets = $campaign->members()
+                ->whereIn('role', ['player', 'observer'])
                 ->with('user:id,name')
                 ->get()
-                ->unique('user_id')
-                ->values()
-                ->map(fn (SceneMember $member) => ['id' => $member->user_id, 'name' => $member->user->name])
+                ->map(fn ($member) => ['id' => $member->user_id, 'name' => $member->user->name])
                 ->all();
         }
 
@@ -50,7 +53,7 @@ class JournalController extends Controller
 
     public function update(Request $request, Journal $journal): JsonResponse
     {
-        $this->gm($request, $journal->campaign);
+        $this->edit($request, $journal);
         $data = $this->validateEntry($request, $journal->campaign, true);
         $journal = DB::transaction(function () use ($journal, $data) {
             $current = Journal::whereKey($journal->id)->lockForUpdate()->firstOrFail();
@@ -102,7 +105,7 @@ class JournalController extends Controller
             $data['shared_user_ids'] = array_values(array_map('intval', $data['shared_user_ids'] ?? []));
         }
 
-        $memberIds = SceneMember::query()->whereIn('scene_id', $campaign->scenes()->pluck('id'))->where('role', 'player')->pluck('user_id')->map(fn ($id) => (int) $id)->unique()->all();
+        $memberIds = $campaign->members()->whereIn('role', ['player', 'observer'])->pluck('user_id')->map(fn ($id) => (int) $id)->unique()->all();
         if (array_key_exists('shared_user_ids', $data)) {
             abort_if(array_diff($data['shared_user_ids'], $memberIds) !== [], 422, 'Compartilhe apenas com jogadores desta campanha.');
         }
@@ -139,7 +142,7 @@ class JournalController extends Controller
 
     public function destroy(Request $request, Journal $journal): JsonResponse
     {
-        $this->gm($request, $journal->campaign);
+        $this->edit($request, $journal);
         $journal->delete();
 
         return response()->json([], 204);
@@ -152,8 +155,16 @@ class JournalController extends Controller
 
     private function gm(Request $request, Campaign $campaign): void
     {
-        if ($this->role($request, $campaign) !== 'gm') {
+        if (! $campaign->canManage($request->user())) {
             abort(403, 'Apenas o GM pode editar o diário.');
         }
+    }
+
+    private function edit(Request $request, Journal $journal): void
+    {
+        $role = $this->role($request, $journal->campaign);
+        abort_if($role === 'observer', 403, 'Observadores possuem acesso somente de leitura.');
+        abort_unless($journal->campaign->canManage($request->user())
+            || CampaignResourcePermission::permits($journal->campaign, $request->user(), 'journal', $journal->id, 'edit'), 403, 'Sem permissão para editar esta nota.');
     }
 }

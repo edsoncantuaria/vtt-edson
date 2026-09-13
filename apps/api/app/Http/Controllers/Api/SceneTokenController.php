@@ -19,7 +19,7 @@ final class SceneTokenController extends Controller
 
     public function upsertToken(UpsertSceneTokenRequest $request, Scene $scene): JsonResponse
     {
-        $member = $this->requireMember($request, $scene);
+        $member = $this->requireParticipant($request, $scene);
         $data = $request->validated();
 
         $state = $scene->state;
@@ -27,7 +27,7 @@ final class SceneTokenController extends Controller
         $existingIndex = collect($state['tokens'])->search(fn ($t) => $t['id'] === $id);
 
         if ($existingIndex === false) {
-            $this->requireGm($request, $scene);
+            $this->requireSceneEditor($request, $scene);
             $state['tokens'][] = [
                 'id' => $id,
                 'x' => (float) $data['x'],
@@ -84,7 +84,7 @@ final class SceneTokenController extends Controller
 
     public function prepareEncounter(Request $request, Scene $scene): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $data = $request->validate([
             'actorId' => ['required', 'integer'], 'quantity' => ['required', 'integer', 'min:1', 'max:20'],
             'x' => ['required', 'numeric'], 'y' => ['required', 'numeric'], 'requestId' => ['required', 'uuid'],
@@ -117,7 +117,7 @@ final class SceneTokenController extends Controller
 
     public function deleteToken(Request $request, Scene $scene, string $tokenId): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $state = $scene->state;
         $state['tokens'] = array_values(array_filter(
             $state['tokens'],

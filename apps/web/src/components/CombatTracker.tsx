@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import type { Combat } from "@vtt/core";
 import { api } from "../lib/api";
-import { useSession } from "../store/session";
+import { pluginRegistry } from "../lib/plugins";
+import { isManagerRole, useSession } from "../store/session";
 import { Icon } from "./Icon";
 import { Modal } from "./Modal";
 import "./CombatTracker.css";
@@ -22,6 +23,14 @@ export function CombatTracker() {
         body: data ? JSON.stringify(data) : undefined,
       });
       if (useSession.getState().sceneId === sceneId) setCombat(res.combat);
+      if (res.combat) {
+        await pluginRegistry.hooks.emit("combat:turn", {
+          sceneId,
+          combatId: res.combat.id,
+          round: res.combat.round,
+          turn: res.combat.turn,
+        });
+      }
       setEnding(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível atualizar o combate.");
@@ -30,7 +39,7 @@ export function CombatTracker() {
       setBusy(false);
     }
   }
-  const gm = role === "gm";
+  const gm = isManagerRole(role);
   return (
     <div className="combat">
       {!combat ? (

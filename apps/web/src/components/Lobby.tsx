@@ -7,6 +7,7 @@ import {
   parseCampaignBackup,
 } from "../lib/campaignBackup";
 import {
+  isManagerRole,
   useSession,
   type RoomResult,
   type RoomSummary,
@@ -154,7 +155,7 @@ export function Lobby() {
     }
   }
   async function exportBackup(room: RoomSummary) {
-    if (busy || room.role !== "gm") return;
+    if (busy || !isManagerRole(room.role)) return;
     setBusy(true);
     setBackupAction(room.campaignId);
     setError(null);

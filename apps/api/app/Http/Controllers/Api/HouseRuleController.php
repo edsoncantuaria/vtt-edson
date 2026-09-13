@@ -19,7 +19,7 @@ class HouseRuleController extends Controller
 
     public function update(Request $request, Campaign $campaign, DiceRoller $dice): JsonResponse
     {
-        abort_unless($campaign->roleFor($request->user()) === 'gm', 403);
+        abort_unless($campaign->canManage($request->user()), 403);
         $data = $request->validate([
             'rules' => ['present', 'array', 'max:12'], 'rules.*.id' => ['required', 'string', 'max:64', 'distinct'],
             'rules.*.name' => ['required', 'string', 'max:100'], 'rules.*.match' => ['required', 'string', 'min:2', 'max:100'],

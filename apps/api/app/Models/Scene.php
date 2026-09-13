@@ -57,7 +57,7 @@ class Scene extends Model
 
     public function visibleTokensFor(User $user): array
     {
-        if ($this->campaign->roleFor($user) === 'gm') {
+        if ($this->campaign->canManage($user)) {
             return $this->state['tokens'];
         }
 
@@ -68,15 +68,22 @@ class Scene extends Model
     public function stateFor(User $user): array
     {
         $state = $this->state;
-        if ($this->campaign->roleFor($user) === 'gm') {
+        if ($this->campaign->canManage($user)
+            || ($this->campaign->roleFor($user) !== 'observer'
+                && CampaignResourcePermission::permits($this->campaign, $user, 'scene', $this->id, 'edit'))) {
             return $state;
         }
         $viewers = $this->perceptionViewers($user);
         $geometry = SceneVisibility::doors($state, $viewers);
         $state['walls'] = $geometry['walls'];
         $state['doors'] = $geometry['doors'];
-        $readable = $this->campaign->actors()->where(fn ($query) => $query->where('owner_user_id', $user->id)->orWhere('shared', true))->pluck('id')->all();
+        $grantedActorIds = CampaignResourcePermission::query()->where('campaign_id', $this->campaign_id)
+            ->where('user_id', $user->id)->where('resource_type', 'actor')->pluck('resource_id');
+        $readable = $this->campaign->actors()->where(fn ($query) => $query->where('owner_user_id', $user->id)->orWhere('shared', true)->orWhereIn('id', $grantedActorIds))->pluck('id')->all();
         $state['tokens'] = SceneVisibility::tokens($this->state, $user, $viewers);
+        foreach (['drawings', 'labels', 'tiles', 'regions'] as $collection) {
+            $state[$collection] = array_values(array_filter($state[$collection] ?? [], fn ($item) => ! ($item['hidden'] ?? false)));
+        }
         $portraits = $this->campaign->actors()->whereIn('id', array_filter(array_column($state['tokens'], 'actorId')))->get()->keyBy('id');
         foreach ($state['tokens'] as &$token) {
             $actor = $portraits->get($token['actorId'] ?? null);

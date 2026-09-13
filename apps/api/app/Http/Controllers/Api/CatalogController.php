@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Campaign;
 use App\Models\CatalogEntry;
 use App\Models\HomebrewEntry;
+use App\Support\FiveToolsIntegrationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +16,7 @@ class CatalogController extends Controller
 {
     public function index(Request $request, string $kind): JsonResponse
     {
-        abort_unless(in_array($kind, ['spells', 'items', 'monsters', 'classes', 'subclasses', 'races', 'backgrounds', 'feats', 'features', 'rules', 'books', 'adventures', 'bastions', 'vehicles', 'decks', 'recipes', 'psionics', 'rewards', 'deities', 'languages', 'hazards', 'objects', 'cults']), 404);
+        abort_unless(in_array($kind, ['spells', 'items', 'monsters', 'classes', 'subclasses', 'races', 'backgrounds', 'feats', 'features', 'rules', 'books', 'adventures', 'bastions', 'vehicles', 'decks', 'cards', 'recipes', 'psionics', 'rewards', 'deities', 'languages', 'hazards', 'objects', 'cults', 'encounters', 'loot', 'magic-variants', 'legendary-groups']), 404);
         $campaign = null;
         $role = null;
         if (in_array($kind, ['books', 'adventures']) || $request->filled('campaignId')) {
@@ -38,7 +39,7 @@ class CatalogController extends Controller
         $base = CatalogEntry::where('kind', $kind)->when($data['edition'] ?? null, fn ($q, $v) => $q->where('edition', $v));
         if (! ($data['includeInactive'] ?? false)) {
             $base->where('active', true);
-        } elseif (! $campaign || $campaign->roleFor($request->user()) !== 'gm') {
+        } elseif (! $campaign || ! $campaign->canManage($request->user())) {
             abort(403, 'Apenas o mestre pode consultar entradas inativas.');
         }
         // Older imports included Foundry activity overrides without a spell level.
@@ -54,7 +55,7 @@ class CatalogController extends Controller
                 $query->orWhereIn('id', DB::table('campaign_catalog_shares')->where('campaign_id', $campaign->id)->select('catalog_entry_id'));
             });
         }
-        if ($campaign && $role !== 'gm' && in_array($kind, ['books', 'adventures'])) {
+        if ($campaign && ! $campaign->canManage($request->user()) && in_array($kind, ['books', 'adventures'])) {
             $base->where(function ($query) use ($campaign, $kind) {
                 if ($kind === 'books') {
                     $query->whereIn('source', ['PHB', 'XPHB']);
@@ -129,9 +130,22 @@ class CatalogController extends Controller
         return response()->json([...$result, 'sources' => $sources]);
     }
 
+    public function integrate(Request $request, Campaign $campaign, CatalogEntry $entry, FiveToolsIntegrationService $integration): JsonResponse
+    {
+        abort_unless($campaign->canManage($request->user()) || $campaign->can($request->user(), 'catalog.manage'), 403);
+        abort_unless(in_array($entry->kind, ['encounters', 'loot'], true), 422, 'Este verbete não é materializável como ferramenta de campanha.');
+        if ($campaign->catalog_sources !== null) {
+            abort_unless(in_array($entry->source, $campaign->catalog_sources, true), 422, 'A fonte deste conteúdo não está habilitada na campanha.');
+        }
+        abort_unless($entry->edition === $campaign->ruleset, 422, 'O conteúdo pertence a outra edição das regras.');
+        $tables = $integration->integrate($campaign, $entry);
+
+        return response()->json(['tables' => collect($tables)->values(), 'kind' => $entry->kind], 201);
+    }
+
     public function share(Request $request, Campaign $campaign, CatalogEntry $entry): JsonResponse
     {
-        abort_unless($campaign->roleFor($request->user()) === 'gm', 403);
+        abort_unless($campaign->canManage($request->user()), 403);
         abort_unless(in_array($entry->kind, ['books', 'adventures']), 422);
         abort_unless($entry->active, 422, 'Entradas inativas não podem ser compartilhadas.');
         $data = $request->validate(['shared' => ['required', 'boolean']]);
@@ -155,7 +169,7 @@ class CatalogController extends Controller
 
     public function updateSources(Request $request, Campaign $campaign): JsonResponse
     {
-        abort_unless($campaign->roleFor($request->user()) === 'gm', 403);
+        abort_unless($campaign->canManage($request->user()), 403);
         $data = $request->validate(['sources' => ['present', 'nullable', 'array', 'max:500'], 'sources.*' => ['string', 'distinct', 'max:80', Rule::exists('catalog_entries', 'source')->where('active', true)]]);
         $campaign->catalog_sources = $data['sources'];
         $campaign->save();

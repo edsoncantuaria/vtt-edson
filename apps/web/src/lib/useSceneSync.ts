@@ -4,6 +4,7 @@ import type { Actor, Combat, SceneState } from "@vtt/core";
 import { api, apiWriteState, ApiError } from "./api";
 import { createEcho } from "./echo";
 import { sceneRequestVersion } from "./scene";
+import { pluginRegistry } from "./plugins";
 import { useSession } from "../store/session";
 
 export function useSceneSync() {
@@ -32,8 +33,10 @@ export function useSceneSync() {
           api<{ combat: Combat | null }>("/scenes/" + sceneId + "/combat"),
         ]);
         if (!active || events !== eventRevision) return;
-        if (version === sceneRequestVersion().revision && !sceneRequestVersion().busy)
+        if (version === sceneRequestVersion().revision && !sceneRequestVersion().busy) {
           session().patchState(scene.scene.state, scene.scene.backgroundUrl);
+          await pluginRegistry.hooks.emit("scene:updated", { sceneId });
+        }
         if (apiVersion === apiWriteState().revision && !apiWriteState().busy) {
           session().setActors(actors.actors);
           session().setCombat(combat.combat);

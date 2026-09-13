@@ -10,12 +10,34 @@ import {
 } from "../lib/catalog";
 import { monsterDataToActorSystem } from "../lib/monsterMapping";
 import { updateScene } from "../lib/scene";
-import { useSession } from "../store/session";
+import { isManagerRole, useSession } from "../store/session";
 import { CatalogEntryCard } from "./compendium/CatalogEntryCard";
 import { CatalogFilters } from "./compendium/CatalogFilters";
 import { HomebrewSection } from "./compendium/HomebrewSection";
 import { Icon } from "./Icon";
 import "./Compendium.css";
+
+const CAMPAIGN_SUBSYSTEM_KINDS: CatalogKind[] = [
+  "bastions",
+  "vehicles",
+  "decks",
+  "recipes",
+  "psionics",
+  "rewards",
+  "deities",
+  "languages",
+  "hazards",
+  "objects",
+  "cults",
+];
+const MATERIALIZED_TOOL_KINDS: CatalogKind[] = ["encounters", "loot"];
+const REFERENCE_ONLY_KINDS: CatalogKind[] = [
+  "books",
+  "adventures",
+  "cards",
+  "legendary-groups",
+  "rules",
+];
 
 export function Compendium() {
   const { role, user, ruleset, actors, selectedActorId, campaignId, sceneId, upsertActor } =
@@ -38,10 +60,15 @@ export function Compendium() {
   const [retry, setRetry] = useState(0);
   const pending = useRef(false);
 
-  const editableActors = actors.filter((actor) => role === "gm" || actor.ownerUserId === user?.id);
+  const editableActors = actors.filter(
+    (actor) => isManagerRole(role) || actor.ownerUserId === user?.id,
+  );
   const targetIsValid = editableActors.some((actor) => actor.id === Number(target));
-  const canAdd = kind === "monsters" ? role === "gm" : targetIsValid;
-  const showAdd = !["books", "adventures"].includes(kind) && (kind !== "monsters" || role === "gm");
+  const campaignIntegrated =
+    MATERIALIZED_TOOL_KINDS.includes(kind) || CAMPAIGN_SUBSYSTEM_KINDS.includes(kind);
+  const canAdd = kind === "monsters" || campaignIntegrated ? isManagerRole(role) : targetIsValid;
+  const showAdd =
+    !REFERENCE_ONLY_KINDS.includes(kind) && (kind !== "monsters" || isManagerRole(role));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -117,6 +144,10 @@ export function Compendium() {
     try {
       if (kind === "monsters") {
         await addMonster(entry);
+      } else if (MATERIALIZED_TOOL_KINDS.includes(kind)) {
+        await integrateTool(entry);
+      } else if (CAMPAIGN_SUBSYSTEM_KINDS.includes(kind)) {
+        await integrateSubsystem(entry);
       } else {
         await addToActor(entry);
       }
@@ -129,7 +160,7 @@ export function Compendium() {
   }
 
   async function addMonster(entry: CatalogEntry) {
-    if (!campaignId || !sceneId || role !== "gm") return;
+    if (!campaignId || !sceneId || !isManagerRole(role)) return;
     const result = await api<{ actor: Actor }>(`/campaigns/${campaignId}/actors`, {
       method: "POST",
       body: JSON.stringify({
@@ -155,56 +186,85 @@ export function Compendium() {
     }
   }
 
+  async function integrateTool(entry: CatalogEntry) {
+    if (!campaignId || !isManagerRole(role)) return;
+    const result = await api<{ tables: Array<{ id: number; name: string }> }>(
+      `/campaigns/${campaignId}/catalog/${entry.id}/integrate`,
+      { method: "POST" },
+    );
+    setNotice(
+      `${entry.name} integrado à campanha em ${result.tables.length} tabela${result.tables.length === 1 ? "" : "s"}.`,
+    );
+  }
+
+  async function integrateSubsystem(entry: CatalogEntry) {
+    if (!campaignId || !isManagerRole(role)) return;
+    await api(`/campaigns/${campaignId}/subsystems`, {
+      method: "POST",
+      body: JSON.stringify({ catalogEntryId: entry.id }),
+    });
+    setNotice(`${entry.name} ativado como subsistema jogável da campanha.`);
+  }
+
   async function addToActor(entry: CatalogEntry) {
     const selected = editableActors.find((actor) => actor.id === Number(target));
     if (!selected) return;
-    const { actor } = await api<{ actor: Actor }>(`/actors/${selected.id}`);
-    const system = structuredClone(actor.system);
     const description =
       typeof entry.data.desc === "string"
         ? entry.data.desc
         : typeof entry.data.description === "string"
           ? entry.data.description
           : undefined;
-
-    if (kind === "spells") {
-      system.spells.known.push({
-        id: crypto.randomUUID(),
-        slug: entry.slug,
-        name: entry.name,
-        level: entry.level ?? 0,
-        prepared: false,
-        description,
-      });
-    } else if (kind === "items") {
-      const rawDamage =
-        typeof entry.data.damage === "string"
-          ? entry.data.damage.match(/\b\d*d\d+(?:[+-]\d+)?\b/i)?.[0]
-          : undefined;
-      system.inventory.push({
-        id: crypto.randomUUID(),
-        slug: entry.slug,
-        name: entry.name,
-        quantity: 1,
-        equipped: false,
-        description:
-          description ?? (typeof entry.data.effect === "string" ? entry.data.effect : undefined),
-        damage: rawDamage,
-      });
-    } else {
-      system.features.push({
-        id: crypto.randomUUID(),
-        name: `${entry.name} · ${entry.source}`,
-        description,
-      });
-    }
-
-    const result = await api<{ actor: Actor }>(`/actors/${actor.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ system, revision: actor.revision ?? 0 }),
+    const documentKind =
+      kind === "spells" ? "spell" : ["items", "magic-variants"].includes(kind) ? "item" : "feature";
+    const rawDamage =
+      typeof entry.data.damage === "string"
+        ? entry.data.damage.match(/\b\d*d\d+(?:[+-]\d+)?\b/i)?.[0]
+        : undefined;
+    const customData =
+      documentKind === "spell"
+        ? {
+            id: crypto.randomUUID(),
+            slug: entry.slug,
+            name: entry.name,
+            level: entry.level ?? 0,
+            prepared: false,
+            description,
+          }
+        : documentKind === "item"
+          ? {
+              id: crypto.randomUUID(),
+              slug: entry.slug,
+              name: entry.name,
+              quantity: 1,
+              equipped: false,
+              description:
+                description ??
+                (typeof entry.data.effect === "string" ? entry.data.effect : undefined),
+              damage: rawDamage,
+            }
+          : {
+              id: crypto.randomUUID(),
+              slug: entry.slug,
+              name: entry.name,
+              source: entry.source,
+              description,
+            };
+    const result = await api<{ actor: Actor }>(`/actors/${selected.id}/documents`, {
+      method: "POST",
+      body: JSON.stringify(
+        entry.id > 0
+          ? { catalogEntryId: entry.id, kind: documentKind }
+          : {
+              kind: documentKind,
+              name: entry.name,
+              source: entry.source,
+              data: customData,
+            },
+      ),
     });
     upsertActor(result.actor);
-    setNotice(`${entry.name} adicionado a ${actor.name}.`);
+    setNotice(`${entry.name} adicionado a ${selected.name} com vínculo de origem.`);
   }
 
   function homebrewEntry(entry: HomebrewCatalogEntry): CatalogEntry {
@@ -241,7 +301,14 @@ export function Compendium() {
         results={results}
         target={target}
         editableActors={editableActors}
-        showTarget={!["monsters", "books", "adventures"].includes(kind)}
+        showTarget={
+          ![
+            "monsters",
+            ...REFERENCE_ONLY_KINDS,
+            ...MATERIALIZED_TOOL_KINDS,
+            ...CAMPAIGN_SUBSYSTEM_KINDS,
+          ].includes(kind)
+        }
         onOptional={(value) => {
           setOptional(value);
           if (!value && CATALOG_KINDS.find((item) => item.id === kind)?.optional)

@@ -18,7 +18,7 @@ class AdventureImportController extends Controller
 {
     private function authorizeImport(Request $request, Campaign $campaign, CatalogEntry $entry): void
     {
-        abort_unless($campaign->roleFor($request->user()) === 'gm', 403);
+        abort_unless($campaign->canManage($request->user()), 403);
         abort_unless($entry->kind === 'adventures', 422);
         abort_unless($campaign->catalog_sources === null || in_array($entry->source, $campaign->catalog_sources), 422, 'Habilite esta fonte na biblioteca da campanha antes de importar.');
     }

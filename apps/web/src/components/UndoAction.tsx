@@ -1,14 +1,14 @@
 import { useState } from "react";
 import type { Actor } from "@vtt/core";
 import { api } from "../lib/api";
-import { useSession } from "../store/session";
+import { isManagerRole, useSession } from "../store/session";
 
 export function UndoAction({ messageId, actorId }: { messageId: string; actorId: number }) {
   const { actors, user, role, sceneId, upsertActor, setError } = useSession();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const actor = actors.find((a) => a.id === actorId);
-  if (!actor || (role !== "gm" && actor.ownerUserId !== user?.id)) return null;
+  if (!actor || (!isManagerRole(role) && actor.ownerUserId !== user?.id)) return null;
   async function undo() {
     setBusy(true);
     try {

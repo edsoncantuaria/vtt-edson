@@ -7,85 +7,113 @@ use InvalidArgumentException;
 
 final class DiceRoller
 {
-    // NdM, com kh/kl opcional (vantagem/desvantagem: 2d20kh1 / 2d20kl1) e modificador +-K.
-    private const PATTERN = '/^\s*(\d*)d(\d+)(?:(kh|kl)(\d*))?([+-]\d+)?\s*$/i';
+    private const DICE_TERM = '/^(\d*)d(\d+)(?:(kh|kl)(\d*))?$/i';
 
     /**
-     * @return array{formula: string, total: int, detail: string, rolls: list<int>, kept: list<int>, natural: int|null, critical: bool, fumble: bool}
+     * Rolls a bounded additive expression such as 2d20kh1+5, 8d6, or d20+d4+3.
+     * The first retained d20 remains the natural roll used for crit/fumble semantics.
+     *
+     * @return array{formula:string,total:int,detail:string,rolls:list<int>,kept:list<int>,natural:int|null,critical:bool,fumble:bool}
      */
     public function roll(string $formula): array
     {
-        if (! preg_match(self::PATTERN, trim($formula), $m)) {
-            throw new InvalidArgumentException('Fórmula de dados inválida. Use NdM±K (ex: 2d6+3) ou NdMkh1/kl1 para vantagem/desvantagem.');
+        $expression = preg_replace('/\s+/', '', trim($formula)) ?? '';
+        if ($expression === '' || ! preg_match('/^[+-]?(?:\d*d\d+(?:(?:kh|kl)\d*)?|\d+)(?:[+-](?:\d*d\d+(?:(?:kh|kl)\d*)?|\d+))*$/i', $expression)) {
+            throw new InvalidArgumentException('Fórmula de dados inválida. Use dados e somas simples (ex.: 2d6+3, d20+d4+5, 2d20kh1+5).');
         }
 
-        $count = $m[1] !== '' ? (int) $m[1] : 1;
-        $sides = (int) $m[2];
-        $keepMode = ($m[3] ?? '') !== '' ? Str::lower($m[3]) : null;
-        $keepCount = $keepMode !== null
-            ? (($m[4] ?? '') !== '' ? (int) $m[4] : 1)
-            : null;
-        $modifier = ($m[5] ?? '') !== '' ? (int) $m[5] : 0;
-
-        if ($count < 1 || $count > 100 || $sides < 2 || $sides > 1000) {
-            throw new InvalidArgumentException('Parâmetros de dados fora do intervalo permitido.');
-        }
-        if ($keepMode !== null && ($keepCount < 1 || $keepCount > $count)) {
-            throw new InvalidArgumentException('Quantidade de dados mantidos (kh/kl) inválida.');
+        preg_match_all('/([+-]?)(\d*d\d+(?:(?:kh|kl)\d*)?|\d+)/i', $expression, $matches, PREG_SET_ORDER);
+        if (count($matches) > 20) {
+            throw new InvalidArgumentException('A fórmula contém termos demais.');
         }
 
-        $rolls = [];
-        for ($i = 0; $i < $count; $i++) {
-            $rolls[] = random_int(1, $sides);
-        }
+        $total = 0;
+        $allRolls = [];
+        $allKept = [];
+        $detailParts = [];
+        $normalized = '';
+        $natural = null;
+        $diceCount = 0;
 
-        $kept = $rolls;
-        $dropped = [];
-        if ($keepMode !== null) {
-            $sorted = $rolls;
-            $keepMode === 'kh' ? rsort($sorted) : sort($sorted);
-            $kept = array_slice($sorted, 0, $keepCount);
+        foreach ($matches as $index => $match) {
+            $sign = $match[1] === '-' ? -1 : 1;
+            $term = $match[2];
+            $prefix = $index === 0 ? ($sign < 0 ? '-' : '') : ($sign < 0 ? '-' : '+');
 
-            $remaining = $rolls;
-            foreach ($kept as $value) {
-                $idx = array_search($value, $remaining, true);
-                if ($idx !== false) {
-                    unset($remaining[$idx]);
+            if (preg_match(self::DICE_TERM, $term, $dice)) {
+                $count = $dice[1] !== '' ? (int) $dice[1] : 1;
+                $sides = (int) $dice[2];
+                $keepMode = ($dice[3] ?? '') !== '' ? Str::lower($dice[3]) : null;
+                $keepCount = $keepMode !== null ? (($dice[4] ?? '') !== '' ? (int) $dice[4] : 1) : null;
+                if ($count < 1 || $count > 100 || $sides < 2 || $sides > 1000) {
+                    throw new InvalidArgumentException('Parâmetros de dados fora do intervalo permitido.');
                 }
+                $diceCount += $count;
+                if ($diceCount > 100) {
+                    throw new InvalidArgumentException('A fórmula excede 100 dados.');
+                }
+                if ($keepMode !== null && ($keepCount < 1 || $keepCount > $count)) {
+                    throw new InvalidArgumentException('Quantidade de dados mantidos (kh/kl) inválida.');
+                }
+
+                $rolls = [];
+                for ($i = 0; $i < $count; $i++) {
+                    $rolls[] = random_int(1, $sides);
+                }
+                $kept = $rolls;
+                $dropped = [];
+                if ($keepMode !== null) {
+                    $sorted = $rolls;
+                    $keepMode === 'kh' ? rsort($sorted) : sort($sorted);
+                    $kept = array_slice($sorted, 0, $keepCount);
+                    $remaining = $rolls;
+                    foreach ($kept as $value) {
+                        $position = array_search($value, $remaining, true);
+                        if ($position !== false) {
+                            unset($remaining[$position]);
+                        }
+                    }
+                    $dropped = array_values($remaining);
+                }
+
+                $subtotal = array_sum($kept) * $sign;
+                $total += $subtotal;
+                array_push($allRolls, ...$rolls);
+                array_push($allKept, ...$kept);
+                if ($natural === null && $sign > 0 && $sides === 20 && count($kept) === 1) {
+                    $natural = $kept[0];
+                }
+                $normalizedTerm = ($count === 1 ? 'd' : $count.'d').$sides;
+                if ($keepMode !== null) {
+                    $normalizedTerm .= $keepMode.$keepCount;
+                }
+                $normalized .= $prefix.$normalizedTerm;
+                $part = implode(' + ', $kept);
+                if ($dropped !== []) {
+                    $part .= ' (descartado: '.implode(', ', $dropped).')';
+                }
+                $detailParts[] = ($sign < 0 ? '-(' : '').$part.($sign < 0 ? ')' : '');
+            } else {
+                $value = (int) $term;
+                if ($value > 100000) {
+                    throw new InvalidArgumentException('Modificador fora do intervalo permitido.');
+                }
+                $total += $sign * $value;
+                $normalized .= $prefix.$value;
+                $detailParts[] = ($sign < 0 ? '-' : '+').$value;
             }
-            $dropped = array_values($remaining);
         }
 
-        $sum = array_sum($kept) + $modifier;
-
-        $detail = implode(' + ', $kept);
-        if ($dropped !== []) {
-            $detail .= ' (descartado: '.implode(', ', $dropped).')';
-        }
-        if ($modifier !== 0) {
-            $detail .= ($modifier > 0 ? ' + ' : ' - ').abs($modifier);
-        }
-        $detail .= ' = '.$sum;
-
-        $normalized = ($count === 1 ? 'd' : $count.'d').$sides;
-        if ($keepMode !== null) {
-            $normalized .= $keepMode.$keepCount;
-        }
-        if ($modifier > 0) {
-            $normalized .= '+'.$modifier;
-        } elseif ($modifier < 0) {
-            $normalized .= (string) $modifier;
-        }
-
-        // "Natural" só faz sentido pra um único d20 mantido (roll normal, ou vantagem/desvantagem kh1/kl1).
-        $natural = ($sides === 20 && count($kept) === 1) ? $kept[0] : null;
+        $detail = trim(implode(' + ', $detailParts));
+        $detail = preg_replace('/\+ -/', '- ', $detail) ?? $detail;
+        $detail .= ' = '.$total;
 
         return [
             'formula' => $normalized,
-            'total' => $sum,
+            'total' => $total,
             'detail' => $detail,
-            'rolls' => $rolls,
-            'kept' => $kept,
+            'rolls' => $allRolls,
+            'kept' => $allKept,
             'natural' => $natural,
             'critical' => $natural === 20,
             'fumble' => $natural === 1,

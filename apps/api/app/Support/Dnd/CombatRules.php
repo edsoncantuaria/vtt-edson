@@ -15,7 +15,7 @@ final class CombatRules
 
     public static function validateAction(array $action): array
     {
-        return Validator::make($action, [
+        $validated = Validator::make($action, [
             'saveAbility' => ['sometimes', Rule::in(self::ABILITIES)],
             'saveDc' => ['sometimes', 'integer', 'min:1', 'max:99'],
             'saveEffect' => ['required_with:saveAbility', Rule::in(['half', 'none'])],
@@ -23,7 +23,74 @@ final class CombatRules
             'concentration' => ['sometimes', 'boolean'],
             'resourceId' => ['sometimes', 'string', 'max:80'],
             'resourceCost' => ['required_with:resourceId', 'integer', 'min:1', 'max:1000'],
+            'documentId' => ['sometimes', 'integer', 'min:1'],
+            'chargeCost' => ['required_with:documentId', 'integer', 'min:1', 'max:1000'],
+            'attackAbility' => ['sometimes', Rule::in([...self::ABILITIES, 'spellcasting', 'weapon'])],
+            'attackBonus' => ['sometimes', 'integer', 'between:-30,30'],
+            'damageAbility' => ['sometimes', Rule::in([...self::ABILITIES, 'spellcasting', 'weapon'])],
+            'damageBonus' => ['sometimes', 'integer', 'between:-30,30'],
+            'effect' => ['sometimes', 'array:name,target,trigger,duration,modifiers,conditions'],
+            'effect.name' => ['required_with:effect', 'string', 'max:160'],
+            'effect.target' => ['required_with:effect', Rule::in(['self', 'targets'])],
+            'effect.trigger' => ['sometimes', Rule::in(['on-use', 'on-hit', 'on-failed-save'])],
+            'effect.duration' => ['required_with:effect', 'array:unit,remaining'],
+            'effect.duration.unit' => ['required_with:effect.duration', Rule::in(['rounds', 'minutes', 'hours', 'until-short-rest', 'until-long-rest', 'permanent'])],
+            'effect.duration.remaining' => ['nullable', 'integer', 'min:0', 'max:100000'],
+            'effect.modifiers' => ['sometimes', 'array', 'max:30'],
+            'effect.modifiers.*.path' => ['required', Rule::in(ActiveEffectEngine::modifierPaths())],
+            'effect.modifiers.*.mode' => ['required', Rule::in(['add', 'multiply', 'override'])],
+            'effect.modifiers.*.value' => ['required'],
+            'effect.conditions' => ['sometimes', 'array', 'max:20'],
+            'effect.conditions.*' => ['string', 'max:120'],
         ])->validate();
+        foreach (data_get($validated, 'effect.modifiers', []) as $modifier) {
+            abort_unless(is_array($modifier) && ActiveEffectEngine::validModifier($modifier), 422, 'Modificador de efeito inválido.');
+        }
+
+        return $validated;
+    }
+
+    public static function attackFormula(array $system, array $action): ?string
+    {
+        if (is_string($action['attackFormula'] ?? null) && trim($action['attackFormula']) !== '') {
+            return trim($action['attackFormula']);
+        }
+        if (! is_string($action['attackAbility'] ?? null)) {
+            return null;
+        }
+        $ability = self::resolveAbility($system, $action['attackAbility']);
+        $bonus = self::abilityModifier($system, $ability) + (int) ($system['proficiencyBonus'] ?? 2) + (int) ($action['attackBonus'] ?? 0);
+
+        return '1d20'.($bonus >= 0 ? '+' : '').$bonus;
+    }
+
+    public static function damageFormula(array $system, array $action): ?string
+    {
+        $formula = is_string($action['damageFormula'] ?? null) ? trim($action['damageFormula']) : '';
+        if ($formula === '') {
+            return null;
+        }
+        if (! is_string($action['damageAbility'] ?? null)) {
+            return $formula;
+        }
+        $ability = self::resolveAbility($system, $action['damageAbility']);
+        $bonus = self::abilityModifier($system, $ability) + (int) ($action['damageBonus'] ?? 0);
+
+        return $formula.($bonus > 0 ? '+'.$bonus : ($bonus < 0 ? (string) $bonus : ''));
+    }
+
+    private static function resolveAbility(array $system, string $ability): string
+    {
+        if ($ability === 'spellcasting') {
+            $candidate = (string) ($system['spellcastingAbility'] ?? 'int');
+
+            return in_array($candidate, self::ABILITIES, true) ? $candidate : 'int';
+        }
+        if ($ability === 'weapon') {
+            return self::abilityModifier($system, 'dex') > self::abilityModifier($system, 'str') ? 'dex' : 'str';
+        }
+
+        return in_array($ability, self::ABILITIES, true) ? $ability : 'str';
     }
 
     public static function saveDc(array $system, array $action): int
@@ -49,7 +116,7 @@ final class CombatRules
             'advantage' => '2d20kh1', 'disadvantage' => '2d20kl1', default => '1d20'
         };
         $adjusted = HouseRules::apply($formula.($bonus >= 0 ? '+' : '').$bonus, $label, $houseRules);
-        $roll = $dice->roll($adjusted['formula']);
+        $roll = $dice->roll($adjusted['formula'].($options['effectFormula'] ?? ''));
 
         return ['ability' => $ability, 'dc' => $dc, 'success' => $roll['total'] >= $dc, 'roll' => $roll, 'houseRules' => $adjusted['rules'], 'mode' => $mode];
     }

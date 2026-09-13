@@ -19,7 +19,7 @@ final class SceneChatController extends Controller
 
     public function store(SendSceneChatRequest $request, Scene $scene, DiceRoller $dice): JsonResponse
     {
-        $this->requireMember($request, $scene);
+        $this->requireParticipant($request, $scene);
         $data = $request->validated();
 
         $user = $request->user();

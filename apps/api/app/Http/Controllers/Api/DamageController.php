@@ -6,8 +6,11 @@ use App\Events\SceneUpdated;
 use App\Game\Dice\DiceRoller;
 use App\Http\Controllers\Concerns\AuthorizesScene;
 use App\Http\Controllers\Controller;
+use App\Models\ActiveEffect;
 use App\Models\Actor;
+use App\Models\ActorDocument;
 use App\Models\Scene;
+use App\Support\Dnd\ActiveEffectEngine;
 use App\Support\Dnd\CombatRules;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,9 +20,11 @@ class DamageController extends Controller
 {
     use AuthorizesScene;
 
+    public function __construct(private readonly ActiveEffectEngine $effects) {}
+
     private function target(Request $request, Scene $scene): Actor
     {
-        $member = $this->requireMember($request, $scene);
+        $member = $request->isMethodSafe() ? $this->requireMember($request, $scene) : $this->requireParticipant($request, $scene);
         $data = $request->validate(['actorId' => ['required', 'integer']]);
         $query = Actor::where('campaign_id', $scene->campaign_id);
         if (! $request->isMethodSafe()) {
@@ -63,7 +68,7 @@ class DamageController extends Controller
         $hasDamage = collect($message['rolls'] ?? [])->contains('kind', 'damage');
 
         return response()->json([
-            'preview' => $hasDamage ? CombatRules::damage($message, $actor->system, $save) : null,
+            'preview' => $hasDamage ? CombatRules::damage($message, $this->effects->effectiveSystem($actor), $save) : null,
             'save' => $save,
             'application' => $operation ? ['undone' => (bool) $operation->undone, 'before' => json_decode($operation->before, true), 'after' => json_decode($operation->after, true), 'resolution' => json_decode($operation->resolution ?? '{}', true)] : null,
             'actionUndone' => (bool) ($record->undone ?? false),
@@ -92,17 +97,19 @@ class DamageController extends Controller
             return response()->json(['save' => $previous]);
         }
         if ($previous) {
-            abort_unless($scene->campaign->roleFor($request->user()) === 'gm', 403, 'Apenas o mestre pode substituir uma salvaguarda já resolvida.');
+            abort_unless($scene->campaign->canManage($request->user()), 403, 'Apenas o mestre pode substituir uma salvaguarda já resolvida.');
         }
         abort_if(DB::table('damage_applications')->where($this->key($scene, $actor, $messageId))->exists(), 409, 'O dano já foi decidido.');
         $decision = $options['decision'] ?? 'roll';
         if ($decision !== 'roll') {
-            $gm = $scene->campaign->roleFor($request->user()) === 'gm';
+            $gm = $scene->campaign->canManage($request->user());
             abort_unless($gm || ($decision === 'failure' && $scene->campaign->ruleset === '5e-2024'), 403, 'Esta decisão requer o mestre nesta edição.');
             $result = ['ability' => $message['save']['ability'], 'dc' => $message['save']['dc'], 'success' => $decision === 'success', 'reason' => $options['reason'], 'manual' => true];
         } else {
             try {
-                $result = CombatRules::save($actor->system, $message['save']['ability'], $message['save']['dc'], $options, $dice, $scene->campaign->house_rules ?? [], 'Salvaguarda de '.$message['save']['ability'].' · '.$message['label']);
+                $effectiveSystem = $this->effects->effectiveSystem($actor);
+                $options['effectFormula'] = $this->effects->formulaSuffix($actor->activeEffects()->get(), 'roll.save');
+                $result = CombatRules::save($effectiveSystem, $message['save']['ability'], $message['save']['dc'], $options, $dice, $scene->campaign->house_rules ?? [], 'Salvaguarda de '.$message['save']['ability'].' · '.$message['label']);
             } catch (InvalidArgumentException $e) {
                 abort(422, $e->getMessage());
             }
@@ -148,6 +155,9 @@ class DamageController extends Controller
                     $system['concentration'] = $resolution['concentrationBefore'];
                 }
                 $system['hp'] = json_decode($operation->before, true);
+                if (isset($resolution['effectId'])) {
+                    ActiveEffect::query()->whereKey($resolution['effectId'])->where('actor_id', $actor->id)->delete();
+                }
                 $resolution['undoneBy'] = $request->user()->id;
                 $resolution['undoneAt'] = now()->toIso8601String();
                 DB::table('damage_applications')->where($key)->update(['undone' => true, 'resolution' => json_encode($resolution)]);
@@ -156,7 +166,17 @@ class DamageController extends Controller
             [$message, $record] = $this->source($scene, $messageId);
             abort_if($record?->undone, 409, 'Esta ação foi desfeita.');
             $save = $record ? (json_decode($record->saves ?? '{}', true)[$actor->id] ?? null) : null;
-            $resolution = CombatRules::damage($message, $system, $save, isset($data['factor']) ? (float) $data['factor'] : null);
+            $effectiveSystem = $this->effects->apply($system, $actor->activeEffects()->get());
+            $hasDamage = collect($message['rolls'] ?? [])->contains('kind', 'damage');
+            if ($hasDamage) {
+                $resolution = CombatRules::damage($message, $effectiveSystem, $save, isset($data['factor']) ? (float) $data['factor'] : null);
+            } else {
+                $attack = CombatRules::attack($message, $effectiveSystem);
+                $resolution = [
+                    'damage' => 0, 'steps' => ['Ação sem dano direto'], 'hit' => $attack['hit'] ?? null, 'attack' => $attack,
+                    'pendingSave' => isset($message['save']) && $save === null, 'manual' => isset($data['factor']),
+                ];
+            }
             abort_if($resolution['pendingSave'], 422, 'Resolva a salvaguarda ou escolha uma decisão manual.');
             $before = $system['hp'] ?? null;
             abort_unless(is_array($before) && isset($before['value'], $before['max']) && is_numeric($before['value']) && is_numeric($before['max']), 422, 'Revise os PV da ficha.');
@@ -178,6 +198,29 @@ class DamageController extends Controller
             $resolution['createdAt'] = now()->toIso8601String();
             $resolution['reason'] = $data['reason'] ?? null;
             $resolution['save'] = $save;
+            $effect = is_array($message['effect'] ?? null) ? $message['effect'] : null;
+            $trigger = $effect['trigger'] ?? 'on-use';
+            $shouldApplyEffect = $effect && (
+                ($trigger === 'on-hit' && ($resolution['hit'] ?? null) === true)
+                || ($trigger === 'on-failed-save' && is_array($save) && ! ($save['success'] ?? false))
+            );
+            if ($shouldApplyEffect) {
+                $existingEffect = ActiveEffect::query()->where('actor_id', $actor->id)->where('metadata->actionMessageId', $messageId)->first();
+                if (! $existingEffect) {
+                    $existingEffect = ActiveEffect::create([
+                        'actor_id' => $actor->id,
+                        'source_document_id' => $message['sourceDocumentId'] ?? null,
+                        'name' => $effect['name'],
+                        'duration' => $effect['duration'],
+                        'modifiers' => $effect['modifiers'] ?? [],
+                        'conditions' => $effect['conditions'] ?? [],
+                        'metadata' => ['actionMessageId' => $messageId, 'sourceActorId' => $message['sourceActorId'] ?? null, 'createdBy' => $request->user()->id],
+                        'active' => true,
+                    ]);
+                }
+                $resolution['effectId'] = $existingEffect->id;
+                $resolution['steps'][] = 'Efeito aplicado: '.$effect['name'];
+            }
             DB::table('damage_applications')->insert([...$key, 'before' => json_encode($before), 'after' => json_encode($system['hp']), 'resolution' => json_encode($resolution), 'undone' => false]);
         }
         $actor->system = $system;
@@ -205,7 +248,9 @@ class DamageController extends Controller
             $system = $actor->system;
             abort_unless(($system['concentration'] ?? null) == $resolution['concentrationBefore'], 409, 'A concentração já mudou; este teste não se aplica ao efeito atual.');
             try {
-                $result = CombatRules::save($system, 'con', $resolution['concentrationDc'], $options, $dice, $scene->campaign->house_rules ?? [], 'Concentração · '.$actor->name);
+                $effectiveSystem = $this->effects->apply($system, $actor->activeEffects()->get());
+                $options['effectFormula'] = $this->effects->formulaSuffix($actor->activeEffects()->get(), 'roll.save');
+                $result = CombatRules::save($effectiveSystem, 'con', $resolution['concentrationDc'], $options, $dice, $scene->campaign->house_rules ?? [], 'Concentração · '.$actor->name);
             } catch (InvalidArgumentException $e) {
                 abort(422, $e->getMessage());
             }
@@ -236,14 +281,26 @@ class DamageController extends Controller
         if (! $record->undone) {
             abort_if(DB::table('damage_applications')->where(['scene_id' => $scene->id, 'message_id' => $messageId, 'undone' => false])->exists(), 409, 'Desfaça o dano de todos os alvos primeiro.');
             $system = $actor->system;
-            $current = ['slots' => $system['spells']['slots'] ?? [], 'resources' => $system['resources'] ?? [], 'concentration' => $system['concentration'] ?? null];
-            abort_unless($current == json_decode($record->resource_after, true), 409, 'Os espaços ou a concentração mudaram. Ajuste a ficha manualmente.');
+            $after = json_decode($record->resource_after, true);
             $before = json_decode($record->resource_before, true);
+            $current = ['slots' => $system['spells']['slots'] ?? [], 'resources' => $system['resources'] ?? [], 'concentration' => $system['concentration'] ?? null];
+            $chargeDocument = null;
+            if (is_array($after['documentCharges'] ?? null)) {
+                $chargeDocument = ActorDocument::query()->where('actor_id', $actor->id)->lockForUpdate()->find($after['documentCharges']['id'] ?? 0);
+                abort_unless($chargeDocument && $chargeDocument->charges == ($after['documentCharges']['charges'] ?? null), 409, 'As cargas do item mudaram. Ajuste a ficha manualmente.');
+                $current['documentCharges'] = ['id' => $chargeDocument->id, 'charges' => $chargeDocument->charges];
+            }
+            abort_unless($current == $after, 409, 'Os espaços, recursos ou a concentração mudaram. Ajuste a ficha manualmente.');
             $system['spells']['slots'] = $before['slots'];
             $system['resources'] = $before['resources'] ?? [];
             $system['concentration'] = $before['concentration'];
+            if ($chargeDocument && is_array($before['documentCharges']['charges'] ?? null)) {
+                $chargeDocument->charges = $before['documentCharges']['charges'];
+                $chargeDocument->save();
+            }
             $actor->system = $system;
             $actor->save();
+            ActiveEffect::query()->where('metadata->actionMessageId', $messageId)->delete();
             DB::table('action_records')->where('id', $record->id)->update(['undone' => true, 'updated_at' => now()]);
             broadcast(new SceneUpdated($scene, 'resolution'));
         }

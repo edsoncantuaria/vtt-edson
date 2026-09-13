@@ -16,7 +16,7 @@ final class ImportCampaignRequest extends FormRequest
         return [
             'archive' => ['required', 'array'],
             'archive.format' => ['required', 'in:vtt-edson-campaign'],
-            'archive.version' => ['required', 'integer', 'between:1,2'],
+            'archive.version' => ['required', 'integer', 'between:1,3'],
             'archive.campaign' => ['required', 'array'],
             'archive.actors' => ['present', 'array'],
             'archive.scenes' => ['required', 'array', 'min:1'],
@@ -34,6 +34,12 @@ final class ImportCampaignRequest extends FormRequest
             'archive.rollTables' => ['sometimes', 'array'],
             'archive.lootResults' => ['sometimes', 'array'],
             'archive.media' => ['sometimes', 'array'],
+            'archive.actorDocuments' => ['sometimes', 'array'],
+            'archive.activeEffects' => ['sometimes', 'array'],
+            'archive.assets' => ['sometimes', 'array'],
+            'archive.macros' => ['sometimes', 'array'],
+            'archive.modules' => ['sometimes', 'array'],
+            'archive.subsystems' => ['sometimes', 'array'],
             'name' => ['sometimes', 'string', 'max:120'],
         ];
     }

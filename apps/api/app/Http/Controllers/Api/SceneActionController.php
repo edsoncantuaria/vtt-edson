@@ -7,8 +7,11 @@ use App\Game\Dice\DiceRoller;
 use App\Http\Controllers\Concerns\AuthorizesScene;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ExecuteSceneActionRequest;
+use App\Models\ActiveEffect;
 use App\Models\Actor;
+use App\Models\ActorDocument;
 use App\Models\Scene;
+use App\Support\Dnd\ActiveEffectEngine;
 use App\Support\Dnd\CombatRules;
 use App\Support\Dnd\HouseRules;
 use Illuminate\Http\JsonResponse;
@@ -20,9 +23,9 @@ final class SceneActionController extends Controller
 {
     use AuthorizesScene;
 
-    public function action(ExecuteSceneActionRequest $request, Scene $scene, DiceRoller $dice): JsonResponse
+    public function action(ExecuteSceneActionRequest $request, Scene $scene, DiceRoller $dice, ActiveEffectEngine $effects): JsonResponse
     {
-        $member = $this->requireMember($request, $scene);
+        $member = $this->requireParticipant($request, $scene);
         $data = $request->validated();
         $actor = Actor::query()->lockForUpdate()->findOrFail($data['actorId']);
         if ((int) $actor->campaign_id !== (int) $scene->campaign_id) {
@@ -44,6 +47,14 @@ final class SceneActionController extends Controller
         }
         CombatRules::validateAction($action);
         $system = $actor->system;
+        $effectiveSystem = $effects->effectiveSystem($actor);
+        $activeEffects = $actor->activeEffects()->get();
+        if ($attackFormula = CombatRules::attackFormula($effectiveSystem, $action)) {
+            $action['attackFormula'] = $attackFormula;
+        }
+        if ($damageFormula = CombatRules::damageFormula($effectiveSystem, $action)) {
+            $action['damageFormula'] = $damageFormula;
+        }
         $resourceBefore = ['slots' => $system['spells']['slots'] ?? [], 'resources' => $system['resources'] ?? [], 'concentration' => $system['concentration'] ?? null];
         $slotLevel = $action['spellSlotLevel'] ?? null;
         if ($slotLevel !== null) {
@@ -60,6 +71,15 @@ final class SceneActionController extends Controller
             $available = max(0, (int) ($genericResource['max'] ?? 0) - (int) ($genericResource['used'] ?? 0));
             abort_unless($available >= $cost, 422, 'Não há usos suficientes de '.$genericResource['name'].'.');
         }
+        $document = null;
+        if (isset($action['documentId'])) {
+            $document = ActorDocument::query()->where('actor_id', $actor->id)->lockForUpdate()->findOrFail($action['documentId']);
+            $charges = $document->charges;
+            abort_unless($charges !== null, 422, 'Este documento não possui cargas configuradas.');
+            $chargeCost = (int) ($action['chargeCost'] ?? 1);
+            abort_unless((int) $charges['value'] >= $chargeCost, 422, 'Não há cargas suficientes em '.$document->name.'.');
+            $resourceBefore['documentCharges'] = ['id' => $document->id, 'charges' => $charges];
+        }
         $rolls = [];
         $appliedRules = [];
         try {
@@ -74,6 +94,7 @@ final class SceneActionController extends Controller
                 }
                 $adjusted = HouseRules::apply($formula, $action['name'].' · '.($kind === 'attack' ? 'Ataque' : 'Dano'), $scene->campaign->house_rules ?? []);
                 $formula = $adjusted['formula'];
+                $formula = $effects->applyFormulaModifier($formula, $activeEffects, $kind === 'attack' ? 'roll.attack' : 'roll.damage');
                 if ($kind === 'damage' && ($rolls[0]['kind'] ?? null) === 'attack' && $rolls[0]['critical']) {
                     $formula = CombatRules::criticalFormula($formula);
                 }
@@ -91,6 +112,12 @@ final class SceneActionController extends Controller
             $resourceIndex = collect($system['resources'])->search(fn ($resource) => ($resource['id'] ?? null) === $action['resourceId']);
             $system['resources'][$resourceIndex]['used'] = ($genericResource['used'] ?? 0) + (int) ($action['resourceCost'] ?? 1);
         }
+        if ($document) {
+            $charges = $document->charges;
+            $charges['value'] = max(0, (int) $charges['value'] - (int) ($action['chargeCost'] ?? 1));
+            $document->charges = $charges;
+            $document->save();
+        }
         if ($action['concentration'] ?? false) {
             $system['concentration'] = ['id' => (string) Str::uuid(), 'name' => $action['name']];
         }
@@ -99,16 +126,54 @@ final class SceneActionController extends Controller
         $system = $actor->system;
         $result = $rolls[0] ?? ['formula' => '', 'total' => 0, 'detail' => 'Aguardando salvaguarda dos alvos', 'critical' => false, 'fumble' => false];
         $user = $request->user();
+        $messageId = (string) Str::uuid();
+        $effectIds = [];
+        $targetActorIds = array_values(array_unique(array_map('intval', $data['targetActorIds'] ?? [])));
+        $actionEffect = isset($action['effect']) && is_array($action['effect']) ? $action['effect'] : null;
+        if ($actionEffect && ($actionEffect['trigger'] ?? 'on-use') === 'on-use') {
+            $effect = $actionEffect;
+            if (($effect['target'] ?? 'targets') === 'self') {
+                $effectActors = collect([$actor]);
+            } else {
+                if (! $member->isGm()) {
+                    $visibleActorIds = collect($scene->stateFor($request->user())['tokens'] ?? [])
+                        ->pluck('actorId')->filter()->map(fn ($id) => (int) $id)->all();
+                    $targetActorIds = array_values(array_intersect($targetActorIds, $visibleActorIds));
+                }
+                $effectActors = Actor::query()->where('campaign_id', $scene->campaign_id)->whereIn('id', $targetActorIds)->get();
+            }
+            foreach ($effectActors as $targetActor) {
+                $createdEffect = ActiveEffect::create([
+                    'actor_id' => $targetActor->id,
+                    'source_document_id' => $document?->id,
+                    'name' => $effect['name'],
+                    'duration' => $effect['duration'],
+                    'modifiers' => $effect['modifiers'] ?? [],
+                    'conditions' => $effect['conditions'] ?? [],
+                    'metadata' => [
+                        'actionMessageId' => $messageId,
+                        'sourceActorId' => $actor->id,
+                        'createdBy' => $user->id,
+                    ],
+                    'active' => true,
+                ]);
+                $effectIds[] = $createdEffect->id;
+            }
+        }
         $message = [
-            'id' => (string) Str::uuid(),
+            'id' => $messageId,
             'userId' => $user->id,
             'userName' => $user->name,
             'type' => 'action',
             'actionKind' => $action['kind'] ?? 'attack',
             'sourceActorId' => $actor->id,
             'damageType' => $action['damageType'] ?? null,
-            'save' => isset($action['saveAbility']) ? ['ability' => $action['saveAbility'], 'dc' => CombatRules::saveDc($system, $action), 'effect' => $action['saveEffect']] : null,
+            'save' => isset($action['saveAbility']) ? ['ability' => $action['saveAbility'], 'dc' => CombatRules::saveDc($effectiveSystem, $action) + (int) round($effects->rollModifier($activeEffects, 'spell.saveDc')), 'effect' => $action['saveEffect']] : null,
             'houseRules' => array_values(array_unique($appliedRules)),
+            'targetActorIds' => $targetActorIds,
+            'effectIds' => $effectIds,
+            'effect' => $actionEffect,
+            'sourceDocumentId' => $document?->id,
             'rolls' => $rolls,
             'label' => $actor->name.' · '.$action['name']
                 .($slotLevel !== null ? ' · espaço nível '.$slotLevel.' consumido' : '')
@@ -126,7 +191,12 @@ final class SceneActionController extends Controller
             'scene_id' => $scene->id, 'actor_id' => $actor->id, 'user_id' => $user->id,
             'request_id' => $requestId, 'message_id' => $message['id'], 'message' => json_encode($message),
             'resource_before' => json_encode($resourceBefore),
-            'resource_after' => json_encode(['slots' => $system['spells']['slots'] ?? [], 'resources' => $system['resources'] ?? [], 'concentration' => $system['concentration'] ?? null]),
+            'resource_after' => json_encode([
+                'slots' => $system['spells']['slots'] ?? [],
+                'resources' => $system['resources'] ?? [],
+                'concentration' => $system['concentration'] ?? null,
+                ...($document ? ['documentCharges' => ['id' => $document->id, 'charges' => $document->fresh()->charges]] : []),
+            ]),
             'created_at' => now(), 'updated_at' => now(),
         ]);
         $state = $scene->state;

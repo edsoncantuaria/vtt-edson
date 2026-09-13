@@ -65,27 +65,38 @@ final class MonsterActorFactory
             }
         }
 
-        foreach (['trait', 'action', 'bonus', 'reaction', 'legendary', 'mythic'] as $section) {
-            foreach (($raw[$section] ?? []) as $action) {
-                if (! is_array($action) || ! is_string($action['name'] ?? null)) {
+        $integratedActions = data_get($data, 'integration.automation.actions', []);
+        if (is_array($integratedActions) && $integratedActions !== []) {
+            foreach ($integratedActions as $index => $action) {
+                if (! is_array($action) || empty($action['name'])) {
                     continue;
                 }
-                $serialized = json_encode($action['entries'] ?? [], JSON_UNESCAPED_UNICODE) ?: '';
-                preg_match('/\\{@hit ([+-]?\d+)\\}/', $serialized, $hit);
-                preg_match_all('/\\{@damage ([^}|]+)/', $serialized, $damages);
-                $damage = count($damages[1]) === 1 ? str_replace(' ', '', $damages[1][0]) : null;
-                if (! isset($hit[1]) && $damage === null) {
-                    continue;
+                $system['actions'][] = [...$action, 'id' => '5etools:monster:'.$entry->id.':'.$index];
+            }
+        } else {
+            // Legacy catalog fallback: old imports have no integration schema.
+            foreach (['trait', 'action', 'bonus', 'reaction', 'legendary', 'mythic'] as $section) {
+                foreach (($raw[$section] ?? []) as $action) {
+                    if (! is_array($action) || ! is_string($action['name'] ?? null)) {
+                        continue;
+                    }
+                    $serialized = json_encode($action['entries'] ?? [], JSON_UNESCAPED_UNICODE) ?: '';
+                    preg_match('/\\{@hit ([+-]?\d+)\\}/', $serialized, $hit);
+                    preg_match_all('/\\{@damage ([^}|]+)/', $serialized, $damages);
+                    $damage = count($damages[1]) === 1 ? str_replace(' ', '', $damages[1][0]) : null;
+                    if (! isset($hit[1]) && $damage === null) {
+                        continue;
+                    }
+                    $system['actions'][] = array_filter([
+                        'id' => (string) Str::uuid(),
+                        'name' => $action['name'],
+                        'kind' => 'attack',
+                        'attackFormula' => isset($hit[1]) ? '1d20'.(((int) $hit[1]) >= 0 ? '+' : '').(int) $hit[1] : null,
+                        'damageFormula' => $damage,
+                        'economy' => $section === 'bonus' ? 'bonus' : ($section === 'reaction' ? 'reaction' : ($section === 'action' ? 'action' : 'other')),
+                        'description' => self::flattenText($action['entries'] ?? []),
+                    ], fn ($value) => $value !== null && $value !== '');
                 }
-                $system['actions'][] = array_filter([
-                    'id' => (string) Str::uuid(),
-                    'name' => $action['name'],
-                    'kind' => 'attack',
-                    'attackFormula' => isset($hit[1]) ? '1d20'.(((int) $hit[1]) >= 0 ? '+' : '').(int) $hit[1] : null,
-                    'damageFormula' => $damage,
-                    'economy' => $section === 'bonus' ? 'bonus' : ($section === 'reaction' ? 'reaction' : ($section === 'action' ? 'action' : 'other')),
-                    'description' => self::flattenText($action['entries'] ?? []),
-                ], fn ($value) => $value !== null && $value !== '');
             }
         }
 
@@ -93,6 +104,37 @@ final class MonsterActorFactory
         foreach (($data['actions'] ?? []) as $action) {
             if (is_array($action) && is_string($action['name'] ?? null)) {
                 $features[] = ['id' => (string) Str::uuid(), 'name' => $action['name'], 'description' => $action['desc'] ?? null];
+            }
+        }
+        $legendaryRef = data_get($data, 'integration.automation.legendaryGroup');
+        if (! is_array($legendaryRef) && is_array($raw['legendaryGroup'] ?? null)) {
+            $legendaryRef = $raw['legendaryGroup'];
+        }
+        if (is_array($legendaryRef) && ! empty($legendaryRef['name'])) {
+            $group = CatalogEntry::query()->where('kind', 'legendary-groups')->where('active', true)
+                ->where('name', $legendaryRef['name'])
+                ->when($legendaryRef['source'] ?? null, fn ($query, $source) => $query->where('source', $source))
+                ->first();
+            if ($group) {
+                $groupData = data_get($group->data, 'integration.automation.legendaryGroup', []);
+                $lair = $groupData['lairActions'] ?? [];
+                $regional = $groupData['regionalEffects'] ?? [];
+                if ($lair) {
+                    $features[] = ['id' => 'legendary-group:'.$group->id.':lair', 'name' => 'Ações de Covil', 'source' => $group->source, 'description' => self::flattenText($lair)];
+                }
+                if ($regional) {
+                    $features[] = ['id' => 'legendary-group:'.$group->id.':regional', 'name' => 'Efeitos Regionais', 'source' => $group->source, 'description' => self::flattenText($regional)];
+                }
+                foreach (is_array($groupData['actions'] ?? null) ? $groupData['actions'] : [] as $index => $action) {
+                    if (is_array($action) && ! empty($action['name'])) {
+                        $system['actions'][] = [...$action, 'id' => '5etools:lair:'.$group->id.':'.$index];
+                    }
+                }
+                $system['statBlock']['legendaryGroupResolved'] = [
+                    'catalogEntryId' => $group->id,
+                    'name' => $group->name,
+                    'source' => $group->source,
+                ];
             }
         }
         $system['features'] = $features;

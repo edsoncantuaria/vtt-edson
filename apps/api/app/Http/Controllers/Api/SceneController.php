@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Events\SceneUpdated;
 use App\Http\Controllers\Concerns\AuthorizesScene;
 use App\Http\Controllers\Controller;
+use App\Models\CampaignResourcePermission;
 use App\Models\Scene;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,6 +23,7 @@ class SceneController extends Controller
                 'id' => $scene->id,
                 'name' => $scene->name,
                 'role' => $member->role,
+                'canEdit' => $member->role !== 'observer' && ($member->isGm() || CampaignResourcePermission::permits($scene->campaign, $request->user(), 'scene', $scene->id, 'edit')),
                 'state' => $scene->stateFor($request->user()),
                 'backgroundUrl' => $scene->background_path
                     ? url('storage/'.$scene->background_path)
@@ -32,7 +34,7 @@ class SceneController extends Controller
 
     public function uploadBackground(Request $request, Scene $scene): JsonResponse
     {
-        $this->requireGm($request, $scene);
+        $this->requireSceneEditor($request, $scene);
         $request->validate([
             'background' => ['required', 'image', 'max:10240'],
         ]);

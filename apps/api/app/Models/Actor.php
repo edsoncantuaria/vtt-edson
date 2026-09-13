@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 /**
@@ -18,6 +20,8 @@ use Illuminate\Support\Str;
  * @property int $revision
  * @property-read Campaign $campaign
  * @property-read User|null $owner
+ * @property-read Collection<int, ActorDocument> $documents
+ * @property-read Collection<int, ActiveEffect> $activeEffects
  */
 class Actor extends Model
 {
@@ -69,6 +73,18 @@ class Actor extends Model
         return $this->belongsTo(User::class, 'owner_user_id');
     }
 
+    /** @return HasMany<ActorDocument, $this> */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(ActorDocument::class)->orderBy('sort')->orderBy('id');
+    }
+
+    /** @return HasMany<ActiveEffect, $this> */
+    public function activeEffects(): HasMany
+    {
+        return $this->hasMany(ActiveEffect::class)->where('active', true)->orderBy('id');
+    }
+
     public function isOwnedBy(User $user): bool
     {
         return (int) $this->owner_user_id === (int) $user->id;
@@ -92,6 +108,8 @@ class Actor extends Model
             'imgPath' => $this->img_path,
             'imgUrl' => $this->img_path ? url('storage/'.$this->img_path) : null,
             'system' => $system,
+            'documents' => $this->relationLoaded('documents') ? $this->documents->values() : $this->documents()->get(),
+            'activeEffects' => $this->relationLoaded('activeEffects') ? $this->activeEffects->values() : $this->activeEffects()->get(),
         ];
     }
 }

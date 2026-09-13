@@ -1,3 +1,4 @@
+import { isManagerRole, type Role } from "@vtt/core";
 import type { CatalogEntry, CatalogKind } from "../../lib/catalog";
 import { CATALOG_KINDS } from "../../lib/catalog";
 import { AdventureImport } from "../AdventureImport";
@@ -29,7 +30,7 @@ export function CatalogEntryCard({
   entry: CatalogEntry;
   kind: CatalogKind;
   expanded: boolean;
-  role: "gm" | "player" | null;
+  role: Role | null;
   campaignId: number | null;
   busy: boolean;
   canAdd: boolean;
@@ -38,7 +39,23 @@ export function CatalogEntryCard({
   onAdd: () => void;
 }) {
   const handbook = kind === "books" && ["PHB", "XPHB"].includes(entry.source);
-  const referenceOnly = ["books", "adventures"].includes(kind);
+  const referenceOnly = ["books", "adventures", "cards", "legendary-groups", "rules"].includes(
+    kind,
+  );
+  const campaignTool = ["encounters", "loot"].includes(kind);
+  const subsystem = [
+    "bastions",
+    "vehicles",
+    "decks",
+    "recipes",
+    "psionics",
+    "rewards",
+    "deities",
+    "languages",
+    "hazards",
+    "objects",
+    "cults",
+  ].includes(kind);
   return (
     <article className="compendium-entry">
       <button className="compendium-entry__head" aria-expanded={expanded} onClick={onToggle}>
@@ -62,7 +79,7 @@ export function CatalogEntryCard({
       {expanded && (
         <div className="compendium-detail">
           <CatalogImage entry={entry} />
-          {kind === "adventures" && role === "gm" && campaignId && (
+          {kind === "adventures" && isManagerRole(role) && campaignId && (
             <AdventureImport entry={entry} campaignId={campaignId} />
           )}
           <p className="catalog-origin">
@@ -85,20 +102,24 @@ export function CatalogEntryCard({
               )}
             />
           </details>
-          {referenceOnly && role === "gm" && !handbook && (
+          {referenceOnly && isManagerRole(role) && !handbook && (
             <button disabled={busy} onClick={onShare}>
               {entry.shared ? "Remover acesso do grupo" : "Compartilhar capítulo com o grupo"}
             </button>
           )}
           {handbook && <p>Livro do Jogador · disponível para todos na mesa.</p>}
-          {!referenceOnly && (kind !== "monsters" || role === "gm") && (
+          {!referenceOnly && (kind !== "monsters" || isManagerRole(role)) && (
             <button className="primary" disabled={busy || !canAdd} onClick={onAdd}>
               <Icon name="plus" size={15} />
               {busy
                 ? "Adicionando…"
                 : kind === "monsters"
                   ? "Adicionar à cena"
-                  : "Adicionar à ficha"}
+                  : campaignTool
+                    ? "Integrar à campanha"
+                    : subsystem
+                      ? "Ativar na campanha"
+                      : "Adicionar à ficha"}
             </button>
           )}
         </div>

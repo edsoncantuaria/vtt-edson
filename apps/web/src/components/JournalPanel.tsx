@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { useSession } from "../store/session";
+import { isManagerRole, useSession } from "../store/session";
 import { Icon } from "./Icon";
 
 type Entry = {
@@ -47,7 +47,7 @@ export function JournalPanel() {
   const [attachmentRef, setAttachmentRef] = useState("");
   const saved = entries.find((entry) => entry.id === selected?.id);
   const dirty = !!selected && !!saved && JSON.stringify(selected) !== JSON.stringify(saved);
-  const gm = role === "gm";
+  const gm = isManagerRole(role);
   const visibleEntries = entries.filter((entry) =>
     scope === "scene"
       ? entry.scene_id === sceneId

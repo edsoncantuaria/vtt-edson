@@ -16,7 +16,7 @@ class HomebrewController extends Controller
     {
         abort_unless($campaign->isMember($request->user()), 403);
         $query = HomebrewPackage::query()->where('campaign_id', $campaign->id)->with('entries')->orderBy('name');
-        if ($campaign->roleFor($request->user()) !== 'gm') {
+        if (! $campaign->canManage($request->user())) {
             $query->where('enabled', true);
         }
 
@@ -91,6 +91,6 @@ class HomebrewController extends Controller
 
     private function gm(Request $request, Campaign $campaign): void
     {
-        abort_unless($campaign->roleFor($request->user()) === 'gm', 403, 'Apenas o GM pode editar homebrew.');
+        abort_unless($campaign->canManage($request->user()), 403, 'Apenas o GM pode editar homebrew.');
     }
 }

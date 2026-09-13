@@ -2,8 +2,15 @@
 
 namespace App\Support;
 
+use App\Models\ActiveEffect;
 use App\Models\Actor;
+use App\Models\ActorDocument;
 use App\Models\Campaign;
+use App\Models\CampaignAsset;
+use App\Models\CampaignMacro;
+use App\Models\CampaignMember;
+use App\Models\CampaignModule;
+use App\Models\CampaignSubsystem;
 use App\Models\CatalogEntry;
 use App\Models\Combat;
 use App\Models\CombatParticipant;
@@ -21,6 +28,7 @@ use App\Models\Room;
 use App\Models\Scene;
 use App\Models\SceneMember;
 use App\Models\User;
+use App\Support\Dnd\ActorDocumentService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -42,20 +50,30 @@ final class CampaignArchiveRestorer
                 ]);
                 $campaign->house_rules = $sourceCampaign['house_rules'] ?? [];
                 $campaign->save();
+                CampaignMember::create([
+                    'campaign_id' => $campaign->id,
+                    'user_id' => $user->id,
+                    'role' => 'gm',
+                    'permissions' => [],
+                ]);
                 $room = Room::create(['campaign_id' => $campaign->id, 'code' => $this->uniqueCode()]);
 
                 $mediaMap = $this->restoreMedia($campaign, $archive['media'] ?? [], $restoredMediaPaths);
                 $catalogMap = $this->catalogMap($archive);
                 $actorMap = $this->restoreActors($campaign, $archive['actors'], $catalogMap, $mediaMap, $user->id);
-
+                $documentMap = $this->restoreActorDocuments($archive['actorDocuments'] ?? [], $actorMap, $catalogMap);
                 $actionMessageMap = $this->actionMessageMap($archive['actions'] ?? []);
-                $sceneMap = $this->restoreScenes($campaign, $archive['scenes'], $actorMap, $catalogMap, $actionMessageMap, $mediaMap, $user);
+                $this->restoreActiveEffects($archive['activeEffects'] ?? [], $actorMap, $documentMap, $actionMessageMap);
+                $this->remapActionDocumentIds($actorMap, $documentMap);
+                $assetMap = $this->restoreAssets($campaign, $archive['assets'] ?? [], $mediaMap, $user->id);
+                $sceneMap = $this->restoreScenes($campaign, $archive['scenes'], $actorMap, $catalogMap, $actionMessageMap, $mediaMap, $assetMap, $user);
 
                 $this->restoreJournals($campaign, $archive['journals'], $sceneMap, $catalogMap);
 
                 $this->restoreSecondaryContent($campaign, $archive, $sceneMap, $actorMap, $catalogMap, $mediaMap, $user);
+                $this->restoreCampaignTools($campaign, $archive, $catalogMap, $user);
 
-                $this->restoreActionHistory($archive, $sceneMap, $actorMap, $actionMessageMap, $user->id);
+                $this->restoreActionHistory($archive, $sceneMap, $actorMap, $documentMap, $actionMessageMap, $user->id);
                 $this->restoreCatalogShares($campaign, $archive, $catalogMap);
 
                 return [$campaign, $room];
@@ -95,6 +113,189 @@ final class CampaignArchiveRestorer
         return $actorMap;
     }
 
+    private function restoreActorDocuments(array $rows, array $actorMap, array $catalogMap): array
+    {
+        $documentMap = [];
+        if ($rows === []) {
+            $service = app(ActorDocumentService::class);
+            foreach ($actorMap as $actorId) {
+                $actor = Actor::find($actorId);
+                if ($actor) {
+                    $service->syncFromLegacy($actor);
+                }
+            }
+
+            return $documentMap;
+        }
+        foreach ($rows as $row) {
+            if (! is_array($row) || ! isset($actorMap[(int) ($row['actor_id'] ?? 0)])
+                || ! in_array($row['kind'] ?? null, ['item', 'spell', 'feature'], true)
+                || empty($row['name'])) {
+                continue;
+            }
+            $catalogEntryId = isset($row['catalog_entry_id'])
+                ? ($catalogMap[(int) $row['catalog_entry_id']] ?? null)
+                : null;
+            $document = ActorDocument::create([
+                'actor_id' => $actorMap[(int) $row['actor_id']],
+                'catalog_entry_id' => $catalogEntryId,
+                'kind' => $row['kind'],
+                'name' => mb_substr((string) $row['name'], 0, 160),
+                'slug' => isset($row['slug']) ? mb_substr((string) $row['slug'], 0, 160) : null,
+                'source' => isset($row['source']) ? mb_substr((string) $row['source'], 0, 80) : null,
+                'data' => is_array($row['data'] ?? null) ? $row['data'] : [],
+                'overrides' => is_array($row['overrides'] ?? null) ? $row['overrides'] : [],
+                'quantity' => max(1, (int) ($row['quantity'] ?? 1)),
+                'equipped' => (bool) ($row['equipped'] ?? false),
+                'prepared' => (bool) ($row['prepared'] ?? false),
+                'attuned' => (bool) ($row['attuned'] ?? false),
+                'charges' => is_array($row['charges'] ?? null) ? $row['charges'] : null,
+                'sort' => max(0, (int) ($row['sort'] ?? 0)),
+            ]);
+            if (isset($row['oldId'])) {
+                $documentMap[(int) $row['oldId']] = $document->id;
+            }
+        }
+
+        return $documentMap;
+    }
+
+    private function restoreActiveEffects(array $rows, array $actorMap, array $documentMap, array $messageMap): void
+    {
+        foreach ($rows as $row) {
+            if (! is_array($row) || ! isset($actorMap[(int) ($row['actor_id'] ?? 0)]) || empty($row['name'])) {
+                continue;
+            }
+            $metadata = is_array($row['metadata'] ?? null) ? $row['metadata'] : [];
+            if (isset($metadata['actionMessageId'])) {
+                $metadata['actionMessageId'] = $messageMap[(string) $metadata['actionMessageId']] ?? null;
+            }
+            if (isset($metadata['sourceActorId'])) {
+                $metadata['sourceActorId'] = $actorMap[(int) $metadata['sourceActorId']] ?? null;
+            }
+            unset($metadata['createdBy']);
+            ActiveEffect::create([
+                'actor_id' => $actorMap[(int) $row['actor_id']],
+                'source_document_id' => isset($row['source_document_id']) ? ($documentMap[(int) $row['source_document_id']] ?? null) : null,
+                'name' => mb_substr((string) $row['name'], 0, 160),
+                'duration' => is_array($row['duration'] ?? null) ? $row['duration'] : ['unit' => 'permanent'],
+                'modifiers' => is_array($row['modifiers'] ?? null) ? array_slice($row['modifiers'], 0, 30) : [],
+                'conditions' => is_array($row['conditions'] ?? null) ? array_slice($row['conditions'], 0, 20) : [],
+                'metadata' => $metadata,
+                'active' => (bool) ($row['active'] ?? true),
+            ]);
+        }
+    }
+
+    private function remapActionDocumentIds(array $actorMap, array $documentMap): void
+    {
+        foreach ($actorMap as $actorId) {
+            $actor = Actor::find($actorId);
+            if (! $actor) {
+                continue;
+            }
+            $system = $actor->system;
+            $changed = false;
+            foreach ($system['actions'] ?? [] as $index => $action) {
+                if (! isset($action['documentId'])) {
+                    continue;
+                }
+                $mapped = $documentMap[(int) $action['documentId']] ?? null;
+                if ($mapped) {
+                    $system['actions'][$index]['documentId'] = $mapped;
+                } else {
+                    unset($system['actions'][$index]['documentId'], $system['actions'][$index]['chargeCost']);
+                }
+                $changed = true;
+            }
+            if ($changed) {
+                $actor->system = $system;
+                $actor->save();
+            }
+        }
+    }
+
+    private function restoreAssets(Campaign $campaign, array $rows, array $mediaMap, int $userId): array
+    {
+        $assetMap = [];
+        foreach ($rows as $row) {
+            if (! is_array($row) || empty($row['name']) || ! in_array($row['kind'] ?? null, ['image', 'audio', 'document'], true)) {
+                continue;
+            }
+            $path = $mediaMap[(string) ($row['path'] ?? '')] ?? null;
+            if (! $path || ! Storage::disk('public')->exists($path)) {
+                continue;
+            }
+            $bytes = Storage::disk('public')->get($path);
+            $asset = CampaignAsset::create([
+                'campaign_id' => $campaign->id,
+                'uploader_user_id' => $userId,
+                'name' => mb_substr((string) $row['name'], 0, 180),
+                'kind' => $row['kind'],
+                'path' => $path,
+                'mime' => mb_substr((string) ($row['mime'] ?? 'application/octet-stream'), 0, 120),
+                'size_bytes' => strlen($bytes),
+                'sha256' => hash('sha256', $bytes),
+                'metadata' => is_array($row['metadata'] ?? null) ? $row['metadata'] : [],
+            ]);
+            if (isset($row['oldId'])) {
+                $assetMap[(int) $row['oldId']] = ['id' => $asset->id, 'path' => $asset->path];
+            }
+        }
+
+        return $assetMap;
+    }
+
+    private function restoreCampaignTools(Campaign $campaign, array $archive, array $catalogMap, User $user): void
+    {
+        foreach ($archive['macros'] ?? [] as $row) {
+            if (! is_array($row) || empty($row['name']) || ! is_array($row['commands'] ?? null)) {
+                continue;
+            }
+            CampaignMacro::create([
+                'campaign_id' => $campaign->id,
+                'owner_user_id' => $user->id,
+                'name' => mb_substr((string) $row['name'], 0, 120),
+                'icon' => isset($row['icon']) ? mb_substr((string) $row['icon'], 0, 80) : null,
+                'commands' => array_slice($row['commands'], 0, 20),
+                'visibility' => in_array($row['visibility'] ?? null, ['owner', 'campaign', 'gm'], true) ? $row['visibility'] : 'owner',
+                'hotbar_slot' => isset($row['hotbar_slot']) ? max(1, min(10, (int) $row['hotbar_slot'])) : null,
+                'enabled' => (bool) ($row['enabled'] ?? true),
+            ]);
+        }
+        foreach ($archive['modules'] ?? [] as $row) {
+            if (! is_array($row) || empty($row['module_id']) || empty($row['name']) || ! is_array($row['manifest'] ?? null)) {
+                continue;
+            }
+            if (isset($row['manifest']['url']) || isset($row['manifest']['script']) || ($row['manifest']['apiVersion'] ?? 1) !== 1) {
+                continue;
+            }
+            CampaignModule::create([
+                'campaign_id' => $campaign->id,
+                'module_id' => mb_substr((string) $row['module_id'], 0, 120),
+                'name' => mb_substr((string) $row['name'], 0, 160),
+                'version' => mb_substr((string) ($row['version'] ?? '1.0.0'), 0, 40),
+                'manifest' => $row['manifest'],
+                'permissions' => is_array($row['permissions'] ?? null) ? array_slice($row['permissions'], 0, 20) : [],
+                'enabled' => (bool) ($row['enabled'] ?? true),
+            ]);
+        }
+        foreach ($archive['subsystems'] ?? [] as $row) {
+            if (! is_array($row) || empty($row['kind']) || empty($row['name'])) {
+                continue;
+            }
+            CampaignSubsystem::create([
+                'campaign_id' => $campaign->id,
+                'catalog_entry_id' => isset($row['catalog_entry_id']) ? ($catalogMap[(int) $row['catalog_entry_id']] ?? null) : null,
+                'kind' => mb_substr((string) $row['kind'], 0, 32),
+                'name' => mb_substr((string) $row['name'], 0, 160),
+                'state' => is_array($row['state'] ?? null) ? $row['state'] : [],
+                'metadata' => is_array($row['metadata'] ?? null) ? $row['metadata'] : [],
+                'active' => (bool) ($row['active'] ?? true),
+            ]);
+        }
+    }
+
     private function actionMessageMap(array $actions): array
     {
         $actionMessageMap = [];
@@ -108,14 +309,14 @@ final class CampaignArchiveRestorer
         return $actionMessageMap;
     }
 
-    private function restoreScenes(Campaign $campaign, array $rows, array $actorMap, array $catalogMap, array $actionMessageMap, array $mediaMap, User $user): array
+    private function restoreScenes(Campaign $campaign, array $rows, array $actorMap, array $catalogMap, array $actionMessageMap, array $mediaMap, array $assetMap, User $user): array
     {
         $sceneMap = [];
         foreach ($rows as $row) {
             if (! is_array($row) || empty($row['name']) || ! is_array($row['state'] ?? null)) {
                 continue;
             }
-            $state = $this->remapSceneState($row['state'], $actorMap, $catalogMap, $actionMessageMap, $user->id, $user->name);
+            $state = $this->remapSceneState($row['state'], $actorMap, $catalogMap, $actionMessageMap, $assetMap, $user->id, $user->name);
             $restoredBackground = $mediaMap[$row['background_path'] ?? ''] ?? null;
             if ($restoredBackground) {
                 $state['backgroundUrl'] = url('storage/'.$restoredBackground);
@@ -411,10 +612,13 @@ final class CampaignArchiveRestorer
             if (! empty($item['sha256'])) {
                 abort_unless(hash_equals((string) $item['sha256'], hash('sha256', $bytes)), 422, 'A mídia do backup falhou na verificação de integridade.');
             }
-            $image = @getimagesizefromstring($bytes);
-            $mime = is_array($image) ? $image['mime'] : null;
-            $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
-            abort_unless(isset($extensions[$mime]), 422, 'O backup contém mídia que não é uma imagem suportada.');
+            $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes);
+            $extensions = [
+                'image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp',
+                'audio/mpeg' => 'mp3', 'audio/ogg' => 'ogg', 'audio/wav' => 'wav', 'audio/x-wav' => 'wav', 'audio/mp4' => 'm4a',
+                'application/pdf' => 'pdf', 'text/plain' => 'txt',
+            ];
+            abort_unless(is_string($mime) && isset($extensions[$mime]), 422, 'O backup contém mídia em formato não suportado.');
             $path = 'restored/'.$campaign->id.'/'.hash('sha256', $bytes).'.'.$extensions[$mime];
             Storage::disk('public')->put($path, $bytes);
             $writtenPaths[] = $path;
@@ -489,7 +693,7 @@ final class CampaignArchiveRestorer
         return $system;
     }
 
-    private function remapSceneState(array $state, array $actorMap, array $catalogMap, array $messageMap, int $userId, string $userName): array
+    private function remapSceneState(array $state, array $actorMap, array $catalogMap, array $messageMap, array $assetMap, int $userId, string $userName): array
     {
         foreach ($state['tokens'] ?? [] as $index => $token) {
             if (isset($token['actorId'])) {
@@ -515,11 +719,20 @@ final class CampaignArchiveRestorer
             $state['chat'][$index]['userId'] = $userId;
             $state['chat'][$index]['userName'] = $userName;
         }
+        foreach ($state['tiles'] ?? [] as $index => $tile) {
+            $oldAssetId = (int) ($tile['assetId'] ?? 0);
+            if ($oldAssetId && isset($assetMap[$oldAssetId])) {
+                $state['tiles'][$index]['assetId'] = $assetMap[$oldAssetId]['id'];
+                $state['tiles'][$index]['url'] = url('storage/'.$assetMap[$oldAssetId]['path']);
+            } elseif ($oldAssetId) {
+                unset($state['tiles'][$index]['assetId']);
+            }
+        }
 
         return $state;
     }
 
-    private function restoreActionHistory(array $archive, array $sceneMap, array $actorMap, array $messageMap, int $userId): void
+    private function restoreActionHistory(array $archive, array $sceneMap, array $actorMap, array $documentMap, array $messageMap, int $userId): void
     {
         foreach ($archive['actions'] ?? [] as $raw) {
             $row = (array) $raw;
@@ -535,6 +748,13 @@ final class CampaignArchiveRestorer
             if (isset($message['sourceActorId'])) {
                 $message['sourceActorId'] = $actorMap[(int) $message['sourceActorId']] ?? null;
             }
+            if (isset($message['targetActorIds']) && is_array($message['targetActorIds'])) {
+                $message['targetActorIds'] = array_values(array_filter(array_map(
+                    fn ($oldActorId) => $actorMap[(int) $oldActorId] ?? null,
+                    $message['targetActorIds'],
+                )));
+            }
+            unset($message['effectIds']);
             DB::table('action_records')->insert([
                 'scene_id' => $sceneId,
                 'actor_id' => $actorId,
@@ -543,8 +763,8 @@ final class CampaignArchiveRestorer
                 'message_id' => $messageId,
                 'message' => json_encode($message, JSON_THROW_ON_ERROR),
                 'saves' => $this->remapSaves($row['saves'] ?? null, $actorMap),
-                'resource_before' => $row['resource_before'] ?? null,
-                'resource_after' => $row['resource_after'] ?? null,
+                'resource_before' => $this->remapActionResources($row['resource_before'] ?? null, $documentMap),
+                'resource_after' => $this->remapActionResources($row['resource_after'] ?? null, $documentMap),
                 'undone' => (bool) ($row['undone'] ?? false),
                 'created_at' => now(), 'updated_at' => now(),
             ]);
@@ -563,6 +783,28 @@ final class CampaignArchiveRestorer
                 'undone' => (bool) ($row['undone'] ?? false),
             ]);
         }
+    }
+
+    private function remapActionResources(mixed $raw, array $documentMap): ?string
+    {
+        if ($raw === null) {
+            return null;
+        }
+        $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+        if (! is_array($decoded)) {
+            return null;
+        }
+        if (is_array($decoded['documentCharges'] ?? null)) {
+            $oldId = (int) ($decoded['documentCharges']['id'] ?? 0);
+            $mapped = $documentMap[$oldId] ?? null;
+            if ($mapped) {
+                $decoded['documentCharges']['id'] = $mapped;
+            } else {
+                unset($decoded['documentCharges']);
+            }
+        }
+
+        return json_encode($decoded, JSON_THROW_ON_ERROR);
     }
 
     private function remapSaves(mixed $raw, array $actorMap): ?string

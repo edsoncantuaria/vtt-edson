@@ -3,7 +3,8 @@ import { useState, type FormEvent } from "react";
 import { api } from "../lib/api";
 import { useSession } from "../store/session";
 import { ActionsSection } from "./actor-editor/ActorEditorActions";
-import { EquipmentSection, SpellsSection } from "./actor-editor/ActorEditorInventory";
+import { CurrencySection, SpellSlotsSection } from "./actor-editor/ActorEditorInventory";
+import { ActorDocumentManager } from "./actor-editor/ActorDocumentManager";
 import {
   EssentialsSection,
   ProficienciesSection,
@@ -18,6 +19,7 @@ const SECTIONS = [
   "Equipamento",
   "Magias",
   "Ações",
+  "Características",
   "História",
 ] as const;
 type EditorSection = (typeof SECTIONS)[number];
@@ -57,10 +59,6 @@ export function ActorEditor({ actor, onClose }: { actor: Actor; onClose: () => v
       system.hp.max < 1
     ) {
       setError("Confira os valores da ficha. PV atual deve ficar entre zero e o máximo.");
-      return;
-    }
-    if (system.inventory.some((item) => item.damage && !isValidDiceFormula(item.damage))) {
-      setError("Use uma fórmula válida para dano, como 1d8+3.");
       return;
     }
     if (
@@ -128,9 +126,24 @@ export function ActorEditor({ actor, onClose }: { actor: Actor; onClose: () => v
             />
           )}
           {section === "Proficiências" && <ProficienciesSection system={system} mutate={mutate} />}
-          {section === "Equipamento" && <EquipmentSection system={system} mutate={mutate} />}
-          {section === "Magias" && <SpellsSection system={system} mutate={mutate} />}
-          {section === "Ações" && <ActionsSection system={system} mutate={mutate} />}
+          {section === "Equipamento" && (
+            <>
+              <ActorDocumentManager actorId={actor.id} kind="item" />
+              <CurrencySection system={system} mutate={mutate} />
+            </>
+          )}
+          {section === "Magias" && (
+            <>
+              <ActorDocumentManager actorId={actor.id} kind="spell" />
+              <SpellSlotsSection system={system} mutate={mutate} />
+            </>
+          )}
+          {section === "Ações" && (
+            <ActionsSection system={system} documents={actor.documents} mutate={mutate} />
+          )}
+          {section === "Características" && (
+            <ActorDocumentManager actorId={actor.id} kind="feature" />
+          )}
           {section === "História" && <StorySection system={system} mutate={mutate} />}
         </fieldset>
         {error && (
