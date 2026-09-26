@@ -67,6 +67,8 @@ class ActorController extends Controller
 
         $this->systemValidator->validate($request);
         $system = $data['system'] ?? ($data['type'] === 'monster' ? ActorStateFactory::monster() : ActorStateFactory::character());
+        abort_if(! $campaign->canManage($user) && collect($system['actions'] ?? [])
+            ->contains(fn ($action) => ($action['visibility'] ?? 'public') === 'gm'), 403, 'Somente o mestre pode criar ações reservadas.');
         if ($data['type'] === 'character') {
             $this->wizard->validate($request, $campaign, $system);
         }
@@ -107,6 +109,14 @@ class ActorController extends Controller
             if (isset($data['system'])) {
                 abort_unless($data['revision'] === $actor->revision, 409, 'A ficha mudou. Recarregue antes de salvar para preservar as ações da mesa.');
                 $this->systemValidator->validate($request);
+                if (! $actor->campaign->canManage($request->user())) {
+                    $public = $data['system']['actions'] ?? [];
+                    abort_if(collect($public)->contains(fn ($action) => ($action['visibility'] ?? 'public') === 'gm'), 403, 'Somente o mestre pode configurar ações reservadas.');
+                    $reserved = array_values(array_filter($actor->system['actions'] ?? [], fn ($action) => ($action['visibility'] ?? 'public') === 'gm'));
+                    $reservedIds = array_column($reserved, 'id');
+                    abort_if(array_intersect($reservedIds, array_column($public, 'id')), 409, 'Há uma ação reservada com o mesmo identificador. Atualize a ficha.');
+                    $data['system']['actions'] = [...$public, ...$reserved];
+                }
                 abort_if($actor->type === 'character' && (int) data_get($data['system'], 'bio.level', 1) !== (int) data_get($actor->system, 'bio.level', 1), 422,
                     'Use Evoluir personagem para subir de nível; a edição manual da ficha não registra evolução.');
                 $actor->system = $data['system'];

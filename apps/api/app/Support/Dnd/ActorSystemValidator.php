@@ -80,6 +80,8 @@ final class ActorSystemValidator
             abort_unless(is_array($action), 422, 'Ação inválida.');
             CombatRules::validateAction($action);
         }
+        $actionIds = array_column($request->input('system.actions', []), 'id');
+        abort_unless(count($actionIds) === count(array_unique($actionIds)), 422, 'Cada ação precisa de um identificador distinto.');
     }
 
     private function validateProgression(Request $request): void

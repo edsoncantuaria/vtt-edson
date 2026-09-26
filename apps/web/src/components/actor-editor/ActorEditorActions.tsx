@@ -6,16 +6,23 @@ import {
   type ActorSystem,
 } from "@vtt/core";
 import { Icon } from "../Icon";
+import {
+  createCustomAction,
+  duplicateActorAction,
+  type CustomActionPreset,
+} from "../../lib/customActions";
 import type { MutateActorSystem } from "./ActorEditorFields";
 
 export function ActionsSection({
   system,
   documents,
   mutate,
+  canManage,
 }: {
   system: ActorSystem;
   documents: ActorDocument[];
   mutate: MutateActorSystem;
+  canManage: boolean;
 }) {
   return (
     <>
@@ -140,10 +147,22 @@ export function ActionsSection({
           {system.actions
             .filter((action) => action.id.startsWith("document:"))
             .map((action) => (
-              <p key={action.id}>
-                <b>{action.name}</b> ·{" "}
-                {action.attackFormula ?? action.damageFormula ?? "efeito/salvaguarda"}
-              </p>
+              <div key={action.id}>
+                <p>
+                  <b>{action.name}</b> ·{" "}
+                  {action.attackFormula ?? action.damageFormula ?? "efeito/salvaguarda"}
+                </p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    mutate((next) =>
+                      next.actions.push(duplicateActorAction(action, crypto.randomUUID())),
+                    )
+                  }
+                >
+                  Duplicar como ação independente
+                </button>
+              </div>
             ))}
         </details>
       )}
@@ -156,25 +175,31 @@ export function ActionsSection({
             system={system}
             documents={documents}
             mutate={mutate}
+            canManage={canManage}
           />
         ),
       )}
-      <button
-        type="button"
-        onClick={() =>
-          mutate((next) => {
-            next.actions.push({
-              id: crypto.randomUUID(),
-              name: "Nova ação",
-              kind: "attack",
-              attackFormula: "1d20+0",
+      <label>
+        Criar ação sem código
+        <select
+          defaultValue=""
+          onChange={(event) => {
+            if (!event.target.value) return;
+            const preset = event.target.value as CustomActionPreset;
+            mutate((next) => {
+              next.actions.push(createCustomAction(preset, crypto.randomUUID()));
             });
-          })
-        }
-      >
-        <Icon name="plus" size={16} />
-        Adicionar ação
-      </button>
+            event.target.value = "";
+          }}
+        >
+          <option value="">Escolher modelo…</option>
+          <option value="attack">Ataque simples</option>
+          <option value="torch">Ataque com tocha</option>
+          <option value="maneuver">Manobra</option>
+          <option value="potion">Poção de cura</option>
+          <option value="feature">Habilidade personalizada</option>
+        </select>
+      </label>
     </>
   );
 }
@@ -185,12 +210,14 @@ function ActionEditor({
   system,
   documents,
   mutate,
+  canManage,
 }: {
   action: ActorAction;
   index: number;
   system: ActorSystem;
   documents: ActorDocument[];
   mutate: MutateActorSystem;
+  canManage: boolean;
 }) {
   return (
     <section className="editor-item">
@@ -225,6 +252,15 @@ function ActionEditor({
         </label>
         <button
           type="button"
+          aria-label={`Duplicar ${action.name}`}
+          onClick={() =>
+            mutate((next) => next.actions.push(duplicateActorAction(action, crypto.randomUUID())))
+          }
+        >
+          Duplicar
+        </button>
+        <button
+          type="button"
           className="icon-button danger"
           aria-label={`Remover ${action.name}`}
           onClick={() =>
@@ -235,6 +271,36 @@ function ActionEditor({
         >
           <Icon name="trash" size={16} />
         </button>
+      </div>
+      <div className="editor-grid">
+        <label>
+          Origem da ação
+          <input
+            maxLength={160}
+            value={action.origin ?? ""}
+            placeholder="Mesa · regra da casa / fonte"
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].origin = event.target.value || undefined;
+              })
+            }
+          />
+        </label>
+        <label>
+          Visibilidade
+          <select
+            value={action.visibility ?? "public"}
+            disabled={!canManage && action.visibility === "gm"}
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].visibility = event.target.value as "public" | "gm";
+              })
+            }
+          >
+            <option value="public">Pública para participantes autorizados</option>
+            {canManage && <option value="gm">Somente mestre</option>}
+          </select>
+        </label>
       </div>
       <div className="editor-grid">
         <label>

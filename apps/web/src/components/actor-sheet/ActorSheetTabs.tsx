@@ -380,6 +380,8 @@ export function ActionsTab({
         <article key={action.id}>
           <div>
             <h4>{action.name}</h4>
+            {action.origin && <small>Origem: {action.origin}</small>}
+            {action.visibility === "gm" && <small> · Visível somente ao mestre</small>}
             <small>
               {ECONOMY_LABEL[action.economy ?? "action"]} ·{" "}
               {action.kind === "spell"

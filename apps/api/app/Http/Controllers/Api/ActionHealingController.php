@@ -82,6 +82,7 @@ final class ActionHealingController extends Controller
         $record = DB::table('action_records')->where(['scene_id' => $scene->id, 'message_id' => $messageId])->first();
         abort_unless($record, 404);
         $message = json_decode($record->message, true, flags: JSON_THROW_ON_ERROR);
+        abort_if(($message['visibility'] ?? 'public') === 'gm' && ! $scene->campaign->canManage($request->user()), 404);
         $roll = collect($message['rolls'] ?? [])->firstWhere('kind', 'heal');
         abort_unless($roll, 422, 'Esta ação não inclui uma cura.');
         $targets = $message['targetActorIds'] ?? [];

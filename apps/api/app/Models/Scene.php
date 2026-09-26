@@ -68,6 +68,10 @@ class Scene extends Model
     public function stateFor(User $user): array
     {
         $state = $this->state;
+        if (! $this->campaign->canManage($user)) {
+            $state['chat'] = array_values(array_filter($state['chat'] ?? [],
+                fn ($message) => ($message['visibility'] ?? 'public') !== 'gm'));
+        }
         if ($this->campaign->canManage($user)
             || ($this->campaign->roleFor($user) !== 'observer'
                 && CampaignResourcePermission::permits($this->campaign, $user, 'scene', $this->id, 'edit'))) {

@@ -98,6 +98,9 @@ export const ActorActionSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(120),
   kind: z.enum(['attack', 'spell', 'feature', 'item']),
+  /** Human-authored provenance; cannot execute scripts. Legacy actions default to sheet/public. */
+  origin: z.string().max(160).optional(),
+  visibility: z.enum(['public', 'gm']).optional(),
   imageUrl: z.string().url().refine((url) => url.startsWith('https://'), 'Use uma URL HTTPS.').optional(),
   target: z.enum(['self', 'single', 'multiple']).optional(),
   maxTargets: z.number().int().min(1).max(50).optional(),

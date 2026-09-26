@@ -37,11 +37,12 @@ class DamageController extends Controller
         return $actor;
     }
 
-    private function source(Scene $scene, string $messageId): array
+    private function source(Request $request, Scene $scene, string $messageId): array
     {
         $record = DB::table('action_records')->where(['scene_id' => $scene->id, 'message_id' => $messageId])->first();
         $message = $record ? json_decode($record->message, true) : collect($scene->state['chat'] ?? [])->firstWhere('id', $messageId);
         abort_unless($message, 404, 'Ação não encontrada.');
+        abort_if(($message['visibility'] ?? 'public') === 'gm' && ! $scene->campaign->canManage($request->user()), 404, 'Ação não encontrada.');
 
         return [$message, $record];
     }
@@ -55,7 +56,11 @@ class DamageController extends Controller
     {
         $this->requireMember($request, $scene);
         $request->validate(['page' => ['sometimes', 'integer', 'min:1']]);
-        $records = DB::table('action_records')->where('scene_id', $scene->id)->orderByDesc('id')->paginate(30);
+        $query = DB::table('action_records')->where('scene_id', $scene->id);
+        if (! $scene->campaign->canManage($request->user())) {
+            $query->where(fn ($q) => $q->whereNull('message->visibility')->orWhere('message->visibility', '!=', 'gm'));
+        }
+        $records = $query->orderByDesc('id')->paginate(30);
 
         return response()->json(['messages' => collect($records->items())->map(fn ($record) => [...json_decode($record->message, true), 'undone' => (bool) $record->undone]), 'lastPage' => $records->lastPage()]);
     }
@@ -63,7 +68,7 @@ class DamageController extends Controller
     public function show(Request $request, Scene $scene, string $messageId)
     {
         $actor = $this->target($request, $scene);
-        [$message, $record] = $this->source($scene, $messageId);
+        [$message, $record] = $this->source($request, $scene, $messageId);
         $save = $record ? (json_decode($record->saves ?? '{}', true)[$actor->id] ?? null) : null;
         $operation = DB::table('damage_applications')->where($this->key($scene, $actor, $messageId))->first();
         $hasDamage = collect($message['rolls'] ?? [])->contains('kind', 'damage');
@@ -98,7 +103,7 @@ class DamageController extends Controller
             'decision' => ['sometimes', 'in:roll,success,failure'],
             'reason' => ['required_if:decision,success,failure', 'string', 'max:240'],
         ]);
-        [$message, $record] = $this->source($scene, $messageId);
+        [$message, $record] = $this->source($request, $scene, $messageId);
         if ($message['targetMode'] ?? null) {
             abort_unless(in_array($actor->id, $message['targetActorIds'] ?? [], true), 422, 'Este ator não pertence aos alvos confirmados da ação.');
         }
@@ -181,7 +186,7 @@ class DamageController extends Controller
                 DB::table('damage_applications')->where($key)->update(['undone' => true, 'resolution' => json_encode($resolution)]);
             }
         } elseif (! $operation) {
-            [$message, $record] = $this->source($scene, $messageId);
+            [$message, $record] = $this->source($request, $scene, $messageId);
             if ($message['targetMode'] ?? null) {
                 abort_unless(in_array($actor->id, $message['targetActorIds'] ?? [], true), 422, 'Este ator não pertence aos alvos confirmados da ação.');
             }
@@ -303,7 +308,7 @@ class DamageController extends Controller
     private function undoActionLocked(Request $request, Scene $scene, string $messageId)
     {
         $actor = $this->target($request, $scene);
-        [, $record] = $this->source($scene, $messageId);
+        [, $record] = $this->source($request, $scene, $messageId);
         abort_unless($record && (int) $record->actor_id === $actor->id, 422);
         if (! $record->undone) {
             abort_if(DB::table('damage_applications')->where(['scene_id' => $scene->id, 'message_id' => $messageId, 'undone' => false])->exists(), 409, 'Desfaça o dano de todos os alvos primeiro.');

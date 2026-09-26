@@ -52,14 +52,19 @@ final class SceneActionController extends Controller
         if ($existing) {
             abort_unless((int) $existing->actor_id === $actor->id, 409);
             abort_if($existing->input_hash !== null && ! hash_equals($existing->input_hash, $inputHash), 409, 'Esta chave já foi usada em outra ação ou seleção de alvos.');
+            $previousMessage = json_decode($existing->message, true, flags: JSON_THROW_ON_ERROR);
+            abort_if(($previousMessage['visibility'] ?? 'public') === 'gm' && ! $scene->campaign->canManage($request->user()), 403, 'Ação reservada ao mestre.');
 
-            return response()->json(['message' => json_decode($existing->message, true), 'actor' => $actor->toPayload(), 'state' => $scene->stateFor($request->user())]);
+            return response()->json(['message' => $previousMessage, 'actor' => $actor->toPayload(), 'state' => $scene->stateFor($request->user())]);
         }
         $action = collect($actor->system['actions'] ?? [])->firstWhere('id', $data['actionId']);
         if (! $action) {
             abort(404, 'Ação não encontrada na ficha.');
         }
+        abort_if(($action['visibility'] ?? 'public') === 'gm' && ! $scene->campaign->canManage($request->user()), 403, 'Ação reservada ao mestre.');
         CombatRules::validateAction($action);
+        $actionSnapshot = $action;
+        $actionRevision = (int) $actor->revision;
         $targetMode = $action['target'] ?? null;
         if ($targetMode === 'self') {
             abort_unless(! $targetActorIds || $targetActorIds === [$actor->id], 422, 'Esta ação só pode mirar a própria ficha.');
@@ -153,6 +158,7 @@ final class SceneActionController extends Controller
                     'modePrepared' => $kind === 'attack' && ($data['mode'] ?? 'normal') !== 'normal',
                     'label' => $actor->name.' · '.$action['name'].' · '.$kind,
                     'houseRules' => $adjusted['rules'],
+                    'visibility' => $action['visibility'] ?? 'public',
                 ])];
                 $appliedRules = array_merge($appliedRules, $adjusted['rules']);
             }
@@ -217,6 +223,9 @@ final class SceneActionController extends Controller
             'userName' => $user->name,
             'type' => 'action',
             'actionKind' => $action['kind'] ?? 'attack',
+            'visibility' => $action['visibility'] ?? 'public',
+            'actionOrigin' => $action['origin'] ?? 'Ficha',
+            'actionRevision' => $actionRevision,
             'sourceActorId' => $actor->id,
             'damageType' => $action['damageType'] ?? null,
             'save' => isset($action['saveAbility']) ? ['ability' => $action['saveAbility'], 'dc' => CombatRules::saveDc($effectiveSystem, $action) + (int) round($effects->rollModifier($activeEffects, 'spell.saveDc')), 'effect' => $action['saveEffect']] : null,
@@ -247,6 +256,8 @@ final class SceneActionController extends Controller
             'scene_id' => $scene->id, 'actor_id' => $actor->id, 'user_id' => $user->id,
             'request_id' => $requestId, 'message_id' => $message['id'], 'message' => json_encode($message),
             'input_hash' => $inputHash,
+            'action_snapshot' => json_encode($actionSnapshot, JSON_THROW_ON_ERROR),
+            'actor_revision' => $actionRevision,
             'resource_before' => json_encode($resourceBefore),
             'resource_after' => json_encode([
                 'slots' => $system['spells']['slots'] ?? [],

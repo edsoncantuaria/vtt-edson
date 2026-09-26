@@ -169,6 +169,11 @@ export function ChatPanel() {
                     {m.actionKind === "spell" ? "Conjuração compartilhada" : "Ação compartilhada"}
                   </b>
                 )}
+                {m.type === "action" && m.actionOrigin && (
+                  <small className="roll-tag">
+                    Origem: {m.actionOrigin} · revisão da ficha {m.actionRevision ?? "legada"}
+                  </small>
+                )}
                 {m.type === "roll" && m.text && m.text !== m.detail && (
                   <p className="roll-outcome">{m.text}</p>
                 )}

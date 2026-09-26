@@ -19,6 +19,8 @@ final class CombatRules
             'id' => ['sometimes', 'string', 'min:1', 'max:80'],
             'kind' => ['sometimes', Rule::in(['attack', 'spell', 'feature', 'item'])],
             'name' => ['sometimes', 'string', 'min:1', 'max:120'],
+            'origin' => ['sometimes', 'string', 'max:160'],
+            'visibility' => ['sometimes', Rule::in(['public', 'gm'])],
             'attackFormula' => ['sometimes', 'string', 'max:120'],
             'damageFormula' => ['sometimes', 'string', 'max:120'],
             'imageUrl' => ['sometimes', 'url', 'max:2048', 'starts_with:https://'],
@@ -58,6 +60,11 @@ final class CombatRules
         ])->validate();
         foreach (data_get($validated, 'effect.modifiers', []) as $modifier) {
             abort_unless(is_array($modifier) && ActiveEffectEngine::validModifier($modifier), 422, 'Modificador de efeito inválido.');
+        }
+        foreach (['attackFormula', 'damageFormula', 'healingFormula'] as $formulaField) {
+            if (isset($action[$formulaField]) && trim((string) $action[$formulaField]) !== '') {
+                abort_unless(app(DiceRoller::class)->isValid((string) $action[$formulaField]), 422, 'Fórmula de '.$formulaField.' inválida.');
+            }
         }
 
         return $validated;
