@@ -84,6 +84,16 @@ final class ActorDocumentService
         if (is_array($automation)) {
             $payload['automation'] = $automation;
         }
+        // Snapshot provenance at materialization time; later catalogue refreshes
+        // must not silently change a character's existing item/spell/feature.
+        $payload['origin'] = [
+            'catalogEntryId' => $entry->id,
+            'slug' => $entry->slug,
+            'source' => $entry->source,
+            'sourceName' => data_get($data, 'sourceName', $entry->source),
+            'edition' => $entry->edition,
+            'contentHash' => $entry->content_hash,
+        ];
 
         $charges = is_array($automation['charges'] ?? null) ? $automation['charges'] : null;
         $document = ActorDocument::create([

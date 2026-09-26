@@ -1,6 +1,7 @@
 import type { Ability } from "@vtt/core";
 
 export type CatalogKind =
+  | "all"
   | "spells"
   | "items"
   | "monsters"
@@ -122,6 +123,11 @@ export type CatalogEntry = {
   name: string;
   source: string;
   edition: string;
+  content_hash?: string | null;
+  homebrewId?: number;
+  packageId?: number;
+  homebrewVersion?: number;
+  inCampaign?: boolean;
   level?: number;
   data: CatalogData;
 };
@@ -147,6 +153,7 @@ export type CatalogResults = {
 };
 
 export const CATALOG_KINDS: { id: CatalogKind; label: string; optional?: boolean }[] = [
+  { id: "all", label: "Todos os conteúdos" },
   { id: "spells", label: "Magias" },
   { id: "items", label: "Equipamentos" },
   { id: "monsters", label: "Criaturas" },

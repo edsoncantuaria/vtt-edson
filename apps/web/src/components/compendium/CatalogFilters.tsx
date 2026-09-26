@@ -9,6 +9,7 @@ export function CatalogFilters({
   level,
   query,
   results,
+  sourceNames,
   target,
   editableActors,
   showTarget,
@@ -27,6 +28,7 @@ export function CatalogFilters({
   level: string;
   query: string;
   results: CatalogResults | null;
+  sourceNames: Record<string, string>;
   target: string;
   editableActors: { id: number; name: string }[];
   showTarget: boolean;
@@ -78,7 +80,11 @@ export function CatalogFilters({
           <select value={source} onChange={(event) => onSource(event.target.value)}>
             <option value="">Todas as fontes</option>
             {results?.sources.map((item) => (
-              <option key={item}>{item}</option>
+              <option key={item} value={item}>
+                {sourceNames[item] && sourceNames[item] !== item
+                  ? `${sourceNames[item]} · ${item}`
+                  : item}
+              </option>
             ))}
           </select>
         </label>
@@ -106,7 +112,8 @@ export function CatalogFilters({
         />
       </label>
       <p className="edition-note">
-        5etools · texto original dos livros. Versões de 2014 e 2024 são mantidas separadamente.
+        O acervo mantém cada edição e sua fonte identificadas. Consulte as condições de uso do
+        material original antes de compartilhá-lo.
       </p>
       {showTarget && (
         <label className="compendium-target">

@@ -43,6 +43,8 @@ final class ActorDocumentController extends Controller
             ]);
             if (isset($data['catalogEntryId'])) {
                 $entry = CatalogEntry::query()->where('active', true)->findOrFail($data['catalogEntryId']);
+                abort_unless($entry->edition === $actor->campaign->ruleset, 422, 'Este conteúdo pertence a outra edição das regras da campanha.');
+                abort_unless($actor->campaign->catalog_sources === null || in_array($entry->source, $actor->campaign->catalog_sources, true), 422, 'A fonte deste conteúdo não está habilitada nesta campanha.');
                 $expectedKind = match ($entry->kind) {
                     'items', 'magic-variants' => 'item', 'spells' => 'spell', default => 'feature',
                 };

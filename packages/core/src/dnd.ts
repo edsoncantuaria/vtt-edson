@@ -197,6 +197,12 @@ export const SubclassProgressionSchema = z.object({
 })
 
 export const ActorSystemSchema = z.object({
+  origin: z.object({
+    kind: z.enum(['catalog', 'homebrew']),
+    slug: z.string(), source: z.string(), edition: z.string(),
+    contentHash: z.string().nullable().optional(),
+    version: z.string().optional(),
+  }).optional(),
   tokenImageUrl: z.string().optional(),
   concentration: z.object({id:z.string(),name:z.string()}).nullable().optional(),
   damageTraits: z.object({resist:z.array(DamageTypeSchema).default([]),immune:z.array(DamageTypeSchema).default([]),vulnerable:z.array(DamageTypeSchema).default([])}).optional(),

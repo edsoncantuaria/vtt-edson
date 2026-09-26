@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ActorDocument;
 use App\Models\Campaign;
 use App\Models\CatalogEntry;
 use App\Models\HomebrewEntry;
@@ -14,18 +15,21 @@ use Illuminate\Validation\Rule;
 
 class CatalogController extends Controller
 {
+    private const SEARCH_KINDS = ['monsters', 'spells', 'items', 'classes', 'races', 'backgrounds', 'feats', 'adventures'];
+
     public function index(Request $request, string $kind): JsonResponse
     {
-        abort_unless(in_array($kind, ['spells', 'items', 'monsters', 'classes', 'subclasses', 'races', 'backgrounds', 'feats', 'features', 'rules', 'books', 'adventures', 'bastions', 'vehicles', 'decks', 'cards', 'recipes', 'psionics', 'rewards', 'deities', 'languages', 'hazards', 'objects', 'cults', 'encounters', 'loot', 'magic-variants', 'legendary-groups']), 404);
+        abort_unless(in_array($kind, ['all', 'spells', 'items', 'monsters', 'classes', 'subclasses', 'races', 'backgrounds', 'feats', 'features', 'rules', 'books', 'adventures', 'bastions', 'vehicles', 'decks', 'cards', 'recipes', 'psionics', 'rewards', 'deities', 'languages', 'hazards', 'objects', 'cults', 'encounters', 'loot', 'magic-variants', 'legendary-groups']), 404);
         $campaign = null;
         $role = null;
-        if (in_array($kind, ['books', 'adventures']) || $request->filled('campaignId')) {
+        if (in_array($kind, ['all', 'books', 'adventures']) || $request->filled('campaignId')) {
             $request->validate(['campaignId' => ['required', 'integer']]);
             $campaign = Campaign::findOrFail($request->integer('campaignId'));
             $role = $campaign->roleFor($request->user());
             abort_unless($role !== null, 403);
         }
         $data = $request->validate([
+            'scope' => ['nullable', 'in:all,library,campaign,homebrew'],
             'query' => ['nullable', 'string', 'max:150'], 'edition' => ['nullable', 'in:5e-2014,5e-2024'],
             'source' => ['nullable', 'string', 'max:80'], 'level' => ['nullable', 'integer', 'min:0', 'max:20'],
             'id' => ['nullable', 'integer', 'min:1'],
@@ -36,7 +40,16 @@ class CatalogController extends Controller
             'includeInactive' => ['nullable', 'boolean'],
             'perPage' => ['nullable', 'integer', 'min:1', 'max:100'], 'page' => ['nullable', 'integer', 'min:1'],
         ]);
-        $base = CatalogEntry::where('kind', $kind)->when($data['edition'] ?? null, fn ($q, $v) => $q->where('edition', $v));
+        $scope = $data['scope'] ?? 'all';
+        abort_if(! $campaign && in_array($scope, ['campaign', 'homebrew'], true), 422, 'Selecione uma campanha para consultar este conteúdo.');
+        $materializedIds = $campaign ? $this->materializedEntryIds($campaign) : [];
+        $base = CatalogEntry::query()->when($kind === 'all', fn ($q) => $q->whereIn('kind', self::SEARCH_KINDS), fn ($q) => $q->where('kind', $kind))
+            ->when($data['edition'] ?? null, fn ($q, $v) => $q->where('edition', $v));
+        if ($scope === 'campaign') {
+            $base->whereIn('id', $materializedIds ?: [0]);
+        } elseif ($scope === 'homebrew') {
+            $base->whereRaw('1 = 0');
+        }
         if (! ($data['includeInactive'] ?? false)) {
             $base->where('active', true);
         } elseif (! $campaign || ! $campaign->canManage($request->user())) {
@@ -49,16 +62,19 @@ class CatalogController extends Controller
         if ($campaign && $campaign->catalog_sources !== null) {
             $base->where(function ($query) use ($campaign, $kind) {
                 $query->whereIn('source', $campaign->catalog_sources);
-                if ($kind === 'books') {
-                    $query->orWhereIn('source', ['PHB', 'XPHB']);
+                if ($kind === 'books' || $kind === 'all') {
+                    $query->orWhere(fn ($books) => $books->where('kind', 'books')->whereIn('source', ['PHB', 'XPHB']));
                 }
                 $query->orWhereIn('id', DB::table('campaign_catalog_shares')->where('campaign_id', $campaign->id)->select('catalog_entry_id'));
             });
         }
-        if ($campaign && ! $campaign->canManage($request->user()) && in_array($kind, ['books', 'adventures'])) {
+        if ($campaign && ! $campaign->canManage($request->user()) && in_array($kind, ['all', 'books', 'adventures'])) {
             $base->where(function ($query) use ($campaign, $kind) {
-                if ($kind === 'books') {
-                    $query->whereIn('source', ['PHB', 'XPHB']);
+                if ($kind === 'all') {
+                    $query->whereNotIn('kind', ['books', 'adventures']);
+                }
+                if ($kind === 'books' || $kind === 'all') {
+                    $query->orWhere(fn ($books) => $books->where('kind', 'books')->whereIn('source', ['PHB', 'XPHB']));
                 }
                 $query->orWhereIn('id', DB::table('campaign_catalog_shares')->where('campaign_id', $campaign->id)->select('catalog_entry_id'));
             });
@@ -107,10 +123,14 @@ class CatalogController extends Controller
 
         if ($campaign) {
             $shared = DB::table('campaign_catalog_shares')->where('campaign_id', $campaign->id)->pluck('catalog_entry_id')->all();
-            $result['data'] = array_map(fn ($entry) => [...$entry, 'shared' => in_array($entry['id'], $shared)], $result['data']);
+            $result['data'] = array_map(fn ($entry) => [...$entry,
+                'shared' => in_array($entry['id'], $shared), 'inCampaign' => in_array($entry['id'], $materializedIds),
+            ], $result['data']);
             $homebrew = HomebrewEntry::query()
-                ->where('kind', $kind)
+                ->when($kind === 'all', fn ($q) => $q->whereIn('kind', self::SEARCH_KINDS), fn ($q) => $q->where('kind', $kind))
                 ->whereHas('package', fn ($q) => $q->where('campaign_id', $campaign->id)->where('enabled', true))
+                ->when(in_array($scope, ['library', 'campaign'], true), fn ($q) => $q->whereRaw('1 = 0'))
+                ->when(isset($data['edition']) && $data['edition'] !== $campaign->ruleset, fn ($q) => $q->whereRaw('1 = 0'))
                 ->with('package:id,name,version')
                 ->when($data['query'] ?? null, fn ($q, $v) => $q->where('name', 'like', '%'.addcslashes($v, '%_').'%'))
                 ->orderBy('name')->get()
@@ -128,6 +148,44 @@ class CatalogController extends Controller
         }
 
         return response()->json([...$result, 'sources' => $sources]);
+    }
+
+    /** Entries explicitly imported/shared into a campaign, not the entire allowed library. */
+    private function materializedEntryIds(Campaign $campaign): array
+    {
+        $ids = ActorDocument::query()->whereHas('actor', fn ($q) => $q->where('campaign_id', $campaign->id))
+            ->whereNotNull('catalog_entry_id')->pluck('catalog_entry_id');
+        $ids = $ids->merge(DB::table('campaign_catalog_shares')->where('campaign_id', $campaign->id)->pluck('catalog_entry_id'));
+        foreach ($campaign->scenes()->get(['state']) as $scene) {
+            if ($entryId = data_get($scene->state, 'preparation.entryId')) {
+                $ids->push((int) $entryId);
+            }
+        }
+        $originSlugs = [];
+        foreach ($campaign->actors()->get(['system']) as $actor) {
+            $system = $actor->system;
+            if ($id = data_get($system, 'preparation.classId')) {
+                $ids->push((int) $id);
+            }
+            foreach (data_get($system, 'progression.classes', []) as $class) {
+                if (isset($class['classId'])) {
+                    $ids->push((int) $class['classId']);
+                }
+            }
+            foreach (data_get($system, 'progression.subclasses', []) as $subclass) {
+                if (isset($subclass['subclassId'])) {
+                    $ids->push((int) $subclass['subclassId']);
+                }
+            }
+            if ($slug = data_get($system, 'origin.slug')) {
+                $originSlugs[] = $slug;
+            }
+        }
+        if ($originSlugs) {
+            $ids = $ids->merge(CatalogEntry::query()->whereIn('slug', array_unique($originSlugs))->pluck('id'));
+        }
+
+        return $ids->unique()->values()->all();
     }
 
     public function integrate(Request $request, Campaign $campaign, CatalogEntry $entry, FiveToolsIntegrationService $integration): JsonResponse
@@ -163,14 +221,22 @@ class CatalogController extends Controller
     public function sources(Request $request, Campaign $campaign): JsonResponse
     {
         abort_unless($campaign->roleFor($request->user()) !== null, 403);
+        $sources = CatalogEntry::query()->where('active', true)->where('edition', $campaign->ruleset)
+            ->select('source')->distinct()->orderBy('source')->pluck('source');
+        $names = [];
+        foreach ($sources as $source) {
+            $entry = CatalogEntry::query()->where('active', true)->where('source', $source)
+                ->where('edition', $campaign->ruleset)->whereNotNull('data->sourceName')->first(['data']);
+            $names[$source] = (string) data_get($entry?->data, 'sourceName', $source);
+        }
 
-        return response()->json(['selected' => $campaign->catalog_sources, 'sources' => CatalogEntry::where('active', true)->select('source')->distinct()->orderBy('source')->pluck('source')]);
+        return response()->json(['selected' => $campaign->catalog_sources, 'sources' => $sources, 'sourceNames' => $names]);
     }
 
     public function updateSources(Request $request, Campaign $campaign): JsonResponse
     {
         abort_unless($campaign->canManage($request->user()), 403);
-        $data = $request->validate(['sources' => ['present', 'nullable', 'array', 'max:500'], 'sources.*' => ['string', 'distinct', 'max:80', Rule::exists('catalog_entries', 'source')->where('active', true)]]);
+        $data = $request->validate(['sources' => ['present', 'nullable', 'array', 'max:500'], 'sources.*' => ['string', 'distinct', 'max:80', Rule::exists('catalog_entries', 'source')->where('active', true)->where('edition', $campaign->ruleset)]]);
         $campaign->catalog_sources = $data['sources'];
         $campaign->save();
 

@@ -37,7 +37,7 @@ class AdvancedVttDomainsTest extends TestCase
         $campaignId = $room['campaign']['id'];
         $sceneId = $room['scene']['id'];
         $item = CatalogEntry::create([
-            'slug' => hash('sha256', 'wand'), 'kind' => 'items', 'name' => 'Wand', 'source' => 'DMG',
+            'slug' => hash('sha256', 'wand'), 'kind' => 'items', 'name' => 'Wand', 'source' => 'XDMG',
             'edition' => '5e-2024', 'data' => ['format' => '5etools', 'description' => 'Wand'],
         ]);
         $sourceSystem = ActorStateFactory::character();

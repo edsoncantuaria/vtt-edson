@@ -5,6 +5,7 @@ import { useSession } from "../store/session";
 export function CampaignLibrary() {
   const { campaignId, ruleset } = useSession();
   const [sources, setSources] = useState<string[]>([]);
+  const [sourceNames, setSourceNames] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<string[] | null>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -12,12 +13,13 @@ export function CampaignLibrary() {
   const [message, setMessage] = useState("");
   useEffect(() => {
     const controller = new AbortController();
-    api<{ sources: string[]; selected: string[] | null }>(
+    api<{ sources: string[]; selected: string[] | null; sourceNames: Record<string, string> }>(
       `/campaigns/${campaignId}/catalog-sources`,
       { signal: controller.signal },
     )
       .then((result) => {
         setSources(result.sources);
+        setSourceNames(result.sourceNames ?? {});
         setSelected(result.selected);
       })
       .catch((error) => {
@@ -87,7 +89,11 @@ export function CampaignLibrary() {
               </label>
               <div style={{ maxHeight: 240, overflowY: "auto" }}>
                 {sources
-                  .filter((source) => source.toLowerCase().includes(query.toLowerCase()))
+                  .filter((source) =>
+                    `${source} ${sourceNames[source] ?? ""}`
+                      .toLowerCase()
+                      .includes(query.toLowerCase()),
+                  )
                   .map((source) => (
                     <label className="check-label" key={source}>
                       <input
@@ -101,7 +107,9 @@ export function CampaignLibrary() {
                           )
                         }
                       />
-                      {source}
+                      {sourceNames[source] && sourceNames[source] !== source
+                        ? `${sourceNames[source]} · ${source}`
+                        : source}
                     </label>
                   ))}
               </div>
