@@ -1,0 +1,13 @@
+# D. Continuar e concluir
+
+[Índice](README.md) · [Anterior: jogo](03-jogo.md) · [Demonstração](demo-checklist.md)
+
+| ID | Ator, gatilho e superfície de UI | Estado persistido, transição e autorização | Falha recuperável / recarga |
+| --- | --- | --- | --- |
+| G23 Terminar sessão | GM → menu Sessão → Encerrar sessão → resumo e próxima cena opcional. | `Session` registra início/fim, participantes, cena ativa, combat/estado pendente e checkpoint; `Em andamento → Encerrada`. **Lacuna:** confirmar criação de entidade de sessão e UI de encerramento (não confundir com encerrar combate). | Confirmar fechamento sem apagar cena/atores; timeout não gera sessões duplicadas; players recebem resumo autorizado. |
+| G24 Voltar outro dia | GM/players → Lobby → Retomar campanha/sessão. | Nova `Session` associada à campanha, reabrindo cena/estado confirmado; `Encerrada → Nova sessão` sem reexecutar efeitos anteriores. `Lobby.tsx`, `useSceneSync.ts`. **Lacuna:** fluxo explícito de sessão entre dias. | Offline/Reverb caído mostra reconexão e resync; jogador nunca vê dados de cena não autorizada. |
+| G25 Subir de nível | GM → conceder XP/milestone; player → Evoluir na ficha e resolver escolhas da engine. | Progresso concedido auditável + versão de `Actor` com escolhas/features/HP/slots/recursos; `Elegível → Evoluído`. `CharacterLevelUp.tsx`, `ActorController.php`. **Lacuna:** atualização atual não comprova engine completa nem XP/milestone vinculado à campanha. | Escolha inválida informa pré-requisito; cancelar mantém nível; retry não sobe duas vezes; refresh retoma pendências. |
+| G26 Continuar aventura | GM → próxima cena/capítulo → publicar e ativar; grupo segue sem recriar fichas. | Vínculos aventura/cenas, sessão corrente, journals, tokens e inventário; `Capítulo N → N+1`. `CampaignSceneController.php`. | Prévia e confirmação de transporte/criação de tokens; falha não teleporta grupo; histórico de sessões e personagens permanece. |
+| G27 Concluir aventura | GM → aventura → Finalizar → resumo de capítulos, resultado, loot/progresso e export/backup. | Aventura tem status/horário de conclusão, autor e histórico, preservando campanha e fichas; `Ativa → Concluída` e opção de nova aventura. **Lacuna:** modelo/rota/UI de conclusão distintos de excluir campanha, cena ou combate. | Confirmação e undo/reabertura autorizada; falha conserva aventura ativa; refresh mostra conclusão sem apagar histórico. |
+
+**Gate de saída:** após várias sessões, jogadores mantêm personagens evoluídos e GM conclui aventura com histórico acessível, sem recorrer a planilha ou procedimento técnico. Issues correlatas: #6, #35, #37, #40, #47–#50.
