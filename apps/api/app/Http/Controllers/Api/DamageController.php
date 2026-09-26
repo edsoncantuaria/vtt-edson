@@ -13,6 +13,7 @@ use App\Models\ActorDocument;
 use App\Models\Scene;
 use App\Support\Dnd\ActiveEffectEngine;
 use App\Support\Dnd\CombatRules;
+use App\Support\Dnd\VitalityCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -239,7 +240,9 @@ class DamageController extends Controller
                 ? CombatRules::damage($message, $this->effects->effectiveSystem($actor), $save)
                 : ['damage' => 0, 'steps' => ['Ação sem dano direto'], 'hit' => $attack['hit'] ?? null, 'attack' => $attack, 'pendingSave' => isset($message['save']) && $save === null, 'manual' => false]),
             'save' => $save,
-            'application' => $operation ? ['undone' => (bool) $operation->undone, 'before' => json_decode($operation->before, true), 'after' => json_decode($operation->after, true), 'resolution' => json_decode($operation->resolution ?? '{}', true)] : null,
+            'application' => $operation ? ['operationId' => $operation->id, 'undone' => (bool) $operation->undone,
+                'before' => json_decode($operation->before, true), 'after' => json_decode($operation->after, true),
+                'resolution' => json_decode($operation->resolution ?? '{}', true)] : null,
             'actionUndone' => (bool) ($record->undone ?? false),
         ]);
     }
@@ -399,9 +402,11 @@ class DamageController extends Controller
             $before = $system['hp'] ?? null;
             abort_unless(is_array($before) && isset($before['value'], $before['max']) && is_numeric($before['value']) && is_numeric($before['max']), 422, 'Revise os PV da ficha.');
             $damage = $resolution['damage'];
-            $absorbed = min(max(0, $before['temp'] ?? 0), $damage);
-            $system['hp']['temp'] = max(0, ($before['temp'] ?? 0) - $absorbed);
-            $system['hp']['value'] = max(0, $before['value'] - ($damage - $absorbed));
+            $hpEffect = VitalityCalculator::applyDamage($before, $damage);
+            $system['hp'] = $hpEffect['after'];
+            $resolution['hpEffect'] = $hpEffect;
+            $resolution['steps'] = [...$resolution['steps'], ...$hpEffect['steps']];
+            $resolution['sources'] = array_values(array_unique([...($resolution['sources'] ?? []), ...$hpEffect['sources']]));
             $resolution['concentrationBefore'] = $system['concentration'] ?? null;
             if ($damage > 0 && $resolution['concentrationBefore']) {
                 if ($system['hp']['value'] === 0) {
@@ -489,10 +494,8 @@ class DamageController extends Controller
         abort_if($decision === 'miss' && (int) $data['damageOverride'] > 0, 422, 'Um erro decidido não pode aplicar dano positivo.');
         $before = json_decode($operation->before, true);
         $amount = (int) $data['damageOverride'];
-        $absorbed = min(max(0, (int) ($before['temp'] ?? 0)), $amount);
-        $corrected = $before;
-        $corrected['temp'] = max(0, (int) ($before['temp'] ?? 0) - $absorbed);
-        $corrected['value'] = max(0, (int) $before['value'] - ($amount - $absorbed));
+        $hpEffect = VitalityCalculator::applyDamage($before, $amount);
+        $corrected = $hpEffect['after'];
         $current = $actor->system;
         abort_if($actor->type === 'character' && (int) ($after['value'] ?? -1) === 0 && $corrected['value'] > 0
             && (((int) ($current['deathSaves']['success'] ?? 0) > 0) || ((int) ($current['deathSaves']['failure'] ?? 0) > 0)
@@ -517,6 +520,9 @@ class DamageController extends Controller
         $resolution['manual'] = true;
         $resolution['reason'] = $reason;
         $resolution['steps'][] = 'Correção posterior do mestre: '.$amount.' PV (sem alterar rolagem original)';
+        $resolution['hpEffect'] = $hpEffect;
+        $resolution['steps'] = [...$resolution['steps'], ...$hpEffect['steps']];
+        $resolution['sources'] = array_values(array_unique([...($resolution['sources'] ?? []), ...$hpEffect['sources'], 'Decisão auditada do mestre: correção posterior']));
         $system = $current;
         $system['hp'] = $corrected;
         $actor->system = $system;

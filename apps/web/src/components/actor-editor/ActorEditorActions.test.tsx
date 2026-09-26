@@ -20,9 +20,38 @@ describe("editor configurável de ações", () => {
     expect(html).toContain("Duplicar como ação independente");
     expect(html).toContain("Origem da ação");
     expect(html).toContain("Somente mestre");
+    expect(html).toContain("Componentes de dano por tipo");
+    expect(html).toContain("Adicionar componente tipado");
     const player = renderToStaticMarkup(
       <ActionsSection system={system} documents={[]} mutate={() => {}} canManage={false} />,
     );
     expect(player).not.toContain("Somente mestre");
+  });
+  it("expõe fórmula e tipo por componente e permite configurar redução fixa na ficha", async () => {
+    const system = emptyActorSystem();
+    system.damageReduction = 3;
+    system.actions = [
+      {
+        id: "mixed",
+        name: "Ataque tipado",
+        kind: "attack",
+        damageParts: [
+          { formula: "2d6", damageType: "fire" },
+          { formula: "1d8", damageType: "slashing" },
+        ],
+      },
+    ];
+    const html = renderToStaticMarkup(
+      <ActionsSection system={system} documents={[]} mutate={() => {}} canManage />,
+    );
+    expect(html).toContain("Componente 1");
+    expect(html).toContain("Componente 2");
+    expect(html).toContain("2d6");
+    expect(html).toContain("1d8");
+    expect(html).toContain("Remover componente 2");
+    const { StorySection } = await import("./ActorEditorIdentity");
+    const defense = renderToStaticMarkup(<StorySection system={system} mutate={() => {}} />);
+    expect(defense).toContain("Redução fixa de dano");
+    expect(defense).toContain('value="3"');
   });
 });

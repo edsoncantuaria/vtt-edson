@@ -266,6 +266,24 @@ export function StorySection({
             </div>
           </fieldset>
         ))}
+        <label>
+          Redução fixa de dano (regra opcional explícita da ficha, aplicada uma vez por ataque após
+          defesas)
+          <input
+            type="number"
+            min={0}
+            max={100000}
+            value={system.damageReduction ?? 0}
+            onChange={(event) =>
+              mutate((next) => {
+                next.damageReduction = Math.max(
+                  0,
+                  Math.min(100000, Number(event.target.value) || 0),
+                );
+              })
+            }
+          />
+        </label>
       </details>
       <div className="editor-grid">
         <label>

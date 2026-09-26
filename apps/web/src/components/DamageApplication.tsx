@@ -22,6 +22,17 @@ type AttackResult = {
 type Resolution = {
   damage: number;
   steps: string[];
+  sources?: string[];
+  rolledDamage?: number;
+  automaticDamage?: number;
+  components?: Array<{
+    rollId?: string | null;
+    damageType?: string | null;
+    rolled: number;
+    calculated: number;
+    steps: string[];
+  }>;
+  hpEffect?: { absorbedTemp: number; lostHp: number; steps: string[]; sources: string[] };
   attack?: AttackResult | null;
   concentrationDc?: number;
   concentrationSave?: SaveResult;
@@ -43,6 +54,7 @@ type TargetResult = {
   preview: (Resolution & { hit: boolean | null; pendingSave: boolean }) | null;
   save: SaveResult | null;
   application: {
+    operationId?: number;
     undone: boolean;
     before: { value: number; temp?: number };
     after: { value: number; temp?: number };
@@ -393,6 +405,14 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
             {result.preview.steps.map((step, index) => (
               <small key={index}>{step}</small>
             ))}
+            {isManagerRole(role) && !!result.preview.sources?.length && (
+              <details>
+                <summary>Fontes das regras do cálculo</summary>
+                {result.preview.sources.map((source, index) => (
+                  <small key={index}>{source}</small>
+                ))}
+              </details>
+            )}
             {result.preview.pendingSave && (
               <p>Aguardando salvaguarda para calcular o dano final.</p>
             )}
@@ -498,9 +518,18 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
               PV: {applied.before.value} → {applied.after.value} · Temporários:{" "}
               {applied.before.temp ?? 0} → {applied.after.temp ?? 0}
             </small>
+            {applied.operationId && (
+              <small>
+                Operação de dano #{applied.operationId} · ação {message.id.slice(0, 8)}
+              </small>
+            )}
             {applied.resolution.steps?.map((step, index) => (
               <small key={index}>{step}</small>
             ))}
+            {isManagerRole(role) &&
+              applied.resolution.sources?.map((source, index) => (
+                <small key={index}>Fonte: {source}</small>
+              ))}
             {applied.resolution.reason && <small>Decisão: {applied.resolution.reason}</small>}
             {applied.resolution.corrections?.map((correction) => (
               <small key={correction.requestId}>

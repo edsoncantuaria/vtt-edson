@@ -109,6 +109,7 @@ export const ActorActionSchema = z.object({
   attackAbility: z.enum(['str','dex','con','int','wis','cha','spellcasting','weapon']).optional(),
   attackBonus: z.number().int().min(-30).max(30).optional(),
   damageFormula: z.string().optional(),
+  damageParts: z.array(z.object({ formula: z.string().min(1).max(120), damageType: DamageTypeSchema })).min(1).max(8).optional(),
   healingFormula: z.string().optional(),
   damageAbility: z.enum(['str','dex','con','int','wis','cha','spellcasting','weapon']).optional(),
   damageBonus: z.number().int().min(-30).max(30).optional(),
@@ -214,6 +215,8 @@ export const ActorSystemSchema = z.object({
   tokenImageUrl: z.string().optional(),
   concentration: z.object({id:z.string(),name:z.string()}).nullable().optional(),
   damageTraits: z.object({resist:z.array(DamageTypeSchema).default([]),immune:z.array(DamageTypeSchema).default([]),vulnerable:z.array(DamageTypeSchema).default([])}).optional(),
+  /** Explicit optional flat damage reduction, applied once after typed defenses. */
+  damageReduction: z.number().int().min(0).max(100000).optional(),
   preparation: z.object({
     classId:z.number(),source:z.string(),edition:z.string(),tasks:z.array(z.object({text:z.string(),done:z.boolean()})),
     creation: z.object({

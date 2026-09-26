@@ -113,7 +113,7 @@ export const ChatMessageSchema = z.object({
   fumble: z.boolean().optional(),
   label: z.string().nullable().optional(),
   houseRules: z.array(z.string()).optional(),
-  rolls: z.array(z.object({id:z.string().uuid().optional(),kind:z.enum(['attack','damage','heal']),formula:z.string(),total:z.number(),detail:z.string(),critical:z.boolean(),fumble:z.boolean()})).optional(),
+  rolls: z.array(z.object({id:z.string().uuid().optional(),kind:z.enum(['attack','damage','heal']),formula:z.string(),total:z.number(),detail:z.string(),critical:z.boolean(),fumble:z.boolean(),damageType:z.string().nullable().optional()})).optional(),
   sourceActorId: z.number().optional(),
   targetActorIds: z.array(z.number().int().positive()).optional(),
   targetTokenIds: z.array(z.string()).optional(),

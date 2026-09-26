@@ -155,7 +155,27 @@ final class SceneActionController extends Controller
         $rolls = [];
         $appliedRules = [];
         try {
-            foreach (['attackFormula' => 'attack', 'damageFormula' => 'damage', 'healingFormula' => 'heal'] as $field => $kind) {
+            foreach (['attackFormula' => 'attack', 'damageFormula' => 'damage', 'damageParts' => 'typed-damage', 'healingFormula' => 'heal'] as $field => $kind) {
+                if ($kind === 'typed-damage') {
+                    // Typed parts keep attack → damage → healing order in the action pipeline.
+                    // Each part owns a stable roll ID and damage type for audit/retry.
+                    foreach ($action['damageParts'] ?? [] as $index => $part) {
+                        $adjusted = HouseRules::apply($part['formula'], $action['name'].' · dano '.($index + 1), $scene->campaign->house_rules ?? []);
+                        $formula = $effects->applyFormulaModifier($adjusted['formula'], $activeEffects, 'roll.damage');
+                        if (($rolls[0]['kind'] ?? null) === 'attack' && $rolls[0]['critical']) {
+                            $formula = CombatRules::criticalFormula($formula);
+                        }
+                        $rolls[] = ['kind' => 'damage', 'damageType' => $part['damageType'], ...$ledger->roll($scene, $request->user(), [
+                            'requestId' => $requestId, 'step' => 'damage:'.$index, 'context' => 'damage',
+                            'actorId' => $actor->id, 'formula' => $formula,
+                            'label' => $actor->name.' · '.$action['name'].' · '.$part['damageType'],
+                            'houseRules' => $adjusted['rules'], 'visibility' => $action['visibility'] ?? 'public',
+                        ])];
+                        $appliedRules = array_merge($appliedRules, $adjusted['rules']);
+                    }
+
+                    continue;
+                }
                 $formula = trim((string) ($action[$field] ?? ''));
                 if ($formula === '') {
                     continue;

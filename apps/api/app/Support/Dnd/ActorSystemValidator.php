@@ -41,6 +41,7 @@ final class ActorSystemValidator
             'system.damageTraits' => ['sometimes', 'array:resist,immune,vulnerable'],
             'system.damageTraits.*' => ['array', 'max:13'],
             'system.damageTraits.*.*' => [Rule::in(CombatRules::DAMAGE_TYPES)],
+            'system.damageReduction' => ['sometimes', 'integer', 'between:0,100000'],
             'system.bio.level' => ['sometimes', 'integer', 'between:1,20'],
             'system.progression' => ['sometimes', 'nullable', 'array:classes,subclass,subclasses'],
             'system.progression.classes' => ['required_with:system.progression', 'array', 'min:1', 'max:20'],

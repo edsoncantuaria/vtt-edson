@@ -100,6 +100,37 @@ describe("Ficha em modo de jogo", () => {
     expect(html).toContain("Resolver cura");
     expect(html).not.toContain("Aplicar cura"); // preview is obtained from the server first
   });
+
+  it("exibe os componentes tipados de dano no cartão executável da ficha", () => {
+    const actor = character();
+    actor.system.actions = [
+      {
+        id: "mixed",
+        name: "Lâmina flamejante",
+        kind: "attack",
+        target: "single",
+        damageParts: [
+          { formula: "1d8+3", damageType: "slashing" },
+          { formula: "2d6", damageType: "fire" },
+        ],
+      },
+    ];
+    const html = renderToStaticMarkup(
+      <ActionsTab
+        actor={actor}
+        canEdit
+        busy={false}
+        change={noopAsync}
+        executeAction={noopAsync}
+      />,
+    );
+    expect(html).toContain("Lâmina flamejante");
+    expect(html).toContain("1d8+3");
+    expect(html).toContain("2d6");
+    expect(html).toContain("Cortante");
+    expect(html).toContain("Fogo");
+    expect(html).toContain("Atacar");
+  });
   it("permite rolar atributos, salvaguardas, perícias e iniciativa sem abrir o editor", () => {
     const html = renderToStaticMarkup(
       <AttributesTab

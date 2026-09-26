@@ -316,9 +316,10 @@ function ActionEditor({
           />
         </label>
         <label>
-          Fórmula de dano
+          Fórmula de dano {action.damageParts?.length ? "(use componentes abaixo)" : ""}
           <input
             value={action.damageFormula ?? ""}
+            disabled={!!action.damageParts?.length}
             placeholder="8d6"
             onChange={(event) =>
               mutate((next) => {
@@ -328,6 +329,88 @@ function ActionEditor({
           />
         </label>
       </div>
+      <details>
+        <summary>Componentes de dano por tipo (ex.: fogo + cortante)</summary>
+        <p className="panel-hint">
+          Cada componente tem fórmula e tipo próprios para calcular resistência, imunidade e
+          vulnerabilidade separadamente. Até 8 componentes; substituem a fórmula única.
+          {action.damageFormula &&
+            !action.damageType &&
+            " Defina primeiro o tipo de dano da fórmula atual para convertê-la sem adivinhar a regra."}
+        </p>
+        {action.damageParts?.map((part, partIndex) => (
+          <div className="editor-grid" key={partIndex}>
+            <label>
+              Componente {partIndex + 1} · fórmula
+              <input
+                value={part.formula}
+                placeholder="2d6+1"
+                onChange={(event) =>
+                  mutate((next) => {
+                    next.actions[index].damageParts![partIndex].formula = event.target.value;
+                  })
+                }
+              />
+            </label>
+            <label>
+              Tipo do componente
+              <select
+                value={part.damageType}
+                onChange={(event) =>
+                  mutate((next) => {
+                    next.actions[index].damageParts![partIndex].damageType = event.target
+                      .value as NonNullable<ActorAction["damageParts"]>[number]["damageType"];
+                  })
+                }
+              >
+                {Object.entries(DAMAGE_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() =>
+                mutate((next) => {
+                  next.actions[index].damageParts = next.actions[index].damageParts!.filter(
+                    (_, i) => i !== partIndex,
+                  );
+                  if (!next.actions[index].damageParts!.length)
+                    next.actions[index].damageParts = undefined;
+                })
+              }
+            >
+              Remover componente {partIndex + 1}
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          disabled={
+            (action.damageParts?.length ?? 0) >= 8 || (!!action.damageFormula && !action.damageType)
+          }
+          onClick={() =>
+            mutate((next) => {
+              const target = next.actions[index];
+              const seed = target.damageFormula
+                ? ({
+                    formula: target.damageFormula,
+                    damageType: target.damageType!,
+                  } as NonNullable<ActorAction["damageParts"]>[number])
+                : null;
+              target.damageParts = [
+                ...(target.damageParts ?? (seed ? [seed] : [])),
+                { formula: "1d6", damageType: "fire" },
+              ];
+              target.damageFormula = undefined;
+            })
+          }
+        >
+          Adicionar componente tipado
+        </button>
+      </details>
       <div className="editor-grid">
         <label>
           Fórmula de cura

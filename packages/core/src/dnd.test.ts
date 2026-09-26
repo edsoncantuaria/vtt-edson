@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { ActorActionSchema, ActorResourceSchema, ActorSystemSchema, abilityModifier, emptyActorSystem, formatModifier } from './dnd'
 
+describe('typed damage and optional fixed reduction', () => {
+  it('retains typed components on action and character schemas without breaking legacy actions', () => {
+    const mixed = ActorActionSchema.parse({ id: 'flame-blade', name: 'Flame Blade', kind: 'attack',
+      damageParts: [{ formula: '1d6+3', damageType: 'slashing' }, { formula: '2d6', damageType: 'fire' }] })
+    expect(mixed.damageParts?.map(part => part.damageType)).toEqual(['slashing', 'fire'])
+    expect(ActorActionSchema.parse({ id: 'legacy', name: 'Legacy', kind: 'spell', damageFormula: '8d6', damageType: 'fire' }).damageParts).toBeUndefined()
+    const system = emptyActorSystem()
+    system.damageReduction = 3
+    system.actions = [mixed]
+    expect(ActorSystemSchema.parse(system).damageReduction).toBe(3)
+    expect(ActorActionSchema.safeParse({ ...mixed, damageParts: [{ formula: '1d6', damageType: 'invalid' }] }).success).toBe(false)
+    expect(ActorSystemSchema.safeParse({ ...system, damageReduction: -1 }).success).toBe(false)
+  })
+})
+
 describe('abilityModifier', () => {
   it('segue a tabela padrão 5e', () => {
     expect(abilityModifier(10)).toBe(0)

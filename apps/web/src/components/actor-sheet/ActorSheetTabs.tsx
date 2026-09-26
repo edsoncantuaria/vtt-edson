@@ -1,5 +1,6 @@
 import {
   ABILITY_LABELS,
+  DAMAGE_LABELS,
   SKILL_ABILITY,
   SKILL_LABELS,
   abilityModifier,
@@ -392,7 +393,14 @@ export function ActionsTab({
                     ? "Item"
                     : "Ataque"}{" "}
               ·{" "}
-              {[action.attackFormula, action.damageFormula, action.healingFormula]
+              {[
+                action.attackFormula,
+                action.damageFormula,
+                ...(action.damageParts ?? []).map(
+                  (part) => `${part.formula} (${DAMAGE_LABELS[part.damageType]})`,
+                ),
+                action.healingFormula,
+              ]
                 .filter(Boolean)
                 .join(" · ") || "Efeito sem rolagem"}
             </small>

@@ -1,15 +1,35 @@
 import { useEffect, useState } from "react";
 import type { Actor, ChatMessage } from "@vtt/core";
+import { isManagerRole } from "@vtt/core";
 import { api } from "../lib/api";
 import { useSession } from "../store/session";
 import { healingTargets } from "../lib/healingTargets";
 
 type HealingStatus = {
-  preview: { rollId: string; rolled: number; restored: number; current: number; max: number };
+  preview: {
+    rollId: string;
+    rolled: number;
+    restored: number;
+    excess: number;
+    steps: string[];
+    sources: string[];
+    current: number;
+    max: number;
+    blockedReason?: string | null;
+  };
   application: null | {
+    operationId: number;
     amount: number;
     confirmedBy: number;
     undone: boolean;
+    resolution?: {
+      requested: number;
+      excess: number;
+      rolled: number;
+      reason: string | null;
+      steps: string[];
+      sources: string[];
+    };
     before: { value: number };
     after: { value: number };
   };
@@ -24,6 +44,8 @@ export function HealingApplication({ message }: { message: ChatMessage }) {
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [exact, setExact] = useState("");
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<HealingStatus | null>(null);
@@ -62,12 +84,19 @@ export function HealingApplication({ message }: { message: ChatMessage }) {
         method: "POST",
         body: JSON.stringify({
           actorId: Number(target),
-          ...(undo ? { undo: true } : { confirmed: true }),
+          ...(undo
+            ? { undo: true }
+            : {
+                confirmed: true,
+                ...(exact !== "" ? { amountOverride: Number(exact), reason: reason.trim() } : {}),
+              }),
         }),
       });
       upsertActor(result.actor);
       setStatus(result);
       setConfirmed(false);
+      setExact("");
+      setReason("");
     } catch (error) {
       setError(error instanceof Error ? error.message : "Falha ao confirmar a cura.");
     } finally {
@@ -107,20 +136,77 @@ export function HealingApplication({ message }: { message: ChatMessage }) {
               <strong>Cura rolada: {status.preview.rolled} PV</strong>
               <small>
                 PV atuais {status.preview.current}/{status.preview.max}; recuperação possível:{" "}
-                {status.preview.restored} PV. Rolagem {status.preview.rollId.slice(0, 8)}.
+                {status.preview.restored} PV; excedente {status.preview.excess}. Rolagem{" "}
+                {status.preview.rollId.slice(0, 8)}.
               </small>
+              {isManagerRole(role) &&
+                status.preview.steps.map((step, index) => <small key={index}>{step}</small>)}
+              {isManagerRole(role) &&
+                status.preview.sources.map((source, index) => (
+                  <small key={index}>Fonte: {source}</small>
+                ))}
+              {status.preview.blockedReason && (
+                <small role="alert">{status.preview.blockedReason}</small>
+              )}
               {status.application && (
                 <small>
                   {status.application.undone
                     ? "Cura desfeita"
-                    : `Cura confirmada: +${status.application.amount} PV`}
+                    : `Cura confirmada: +${status.application.amount} PV · operação #${status.application.operationId}`}
                 </small>
+              )}
+              {isManagerRole(role) &&
+                status.application?.resolution?.steps.map((step, index) => (
+                  <small key={index}>Confirmado: {step}</small>
+                ))}
+              {isManagerRole(role) &&
+                status.application?.resolution?.sources.map((source, index) => (
+                  <small key={index}>Fonte: {source}</small>
+                ))}
+              {status.application?.resolution?.reason && (
+                <small>Decisão registrada: {status.application.resolution.reason}</small>
               )}
               {status.actionUndone && <small>A ação foi desfeita.</small>}
             </div>
           )}
           {status && !status.application && !status.actionUndone && (
             <>
+              {isManagerRole(role) && (
+                <div>
+                  <label>
+                    Cura exata decidida pelo mestre (opcional)
+                    <input
+                      type="number"
+                      min={0}
+                      max={100000}
+                      value={exact}
+                      onChange={(event) => setExact(event.target.value)}
+                      placeholder="Vazio: usar cura rolada"
+                    />
+                  </label>
+                  {exact !== "" && (
+                    <>
+                      <small>
+                        Prévia do ajuste: +
+                        {Math.min(
+                          Math.max(0, status.preview.max - status.preview.current),
+                          Math.max(0, Number(exact) || 0),
+                        )}{" "}
+                        PV efetivos, sem alterar PV temporários.
+                      </small>
+                      <label>
+                        Motivo obrigatório do ajuste
+                        <input
+                          value={reason}
+                          maxLength={240}
+                          onChange={(event) => setReason(event.target.value)}
+                          placeholder="Decisão da mesa"
+                        />
+                      </label>
+                    </>
+                  )}
+                </div>
+              )}
               <label className="check-label">
                 <input
                   type="checkbox"
@@ -131,7 +217,16 @@ export function HealingApplication({ message }: { message: ChatMessage }) {
               </label>
               <button
                 className="primary"
-                disabled={!confirmed || loading}
+                disabled={
+                  !confirmed ||
+                  loading ||
+                  !!status.preview.blockedReason ||
+                  (exact !== "" &&
+                    (!Number.isInteger(Number(exact)) ||
+                      Number(exact) < 0 ||
+                      Number(exact) > 100000 ||
+                      !reason.trim()))
+                }
                 onClick={() => void apply()}
               >
                 Aplicar cura
