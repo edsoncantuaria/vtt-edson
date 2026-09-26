@@ -86,7 +86,7 @@ class DamageController extends Controller
             $operation = $applications->get($id);
             $effective = $this->effects->effectiveSystem($actor);
             $preview = $hasDamage
-                ? CombatRules::damage($message, $effective, $save)
+                ? CombatRules::damage($message, $effective, $save, targetActorId: $actor->id)
                 : ['damage' => 0, 'hit' => null, 'pendingSave' => $save === null, 'steps' => ['Ação sem dano direto']];
             $rows[] = [
                 'actorId' => $id, 'name' => $actor->name, 'type' => $actor->type,
@@ -239,7 +239,7 @@ class DamageController extends Controller
 
         return response()->json([
             'preview' => ! $needsResolution ? null : ($hasDamage
-                ? CombatRules::damage($message, $this->effects->effectiveSystem($actor), $save)
+                ? CombatRules::damage($message, $this->effects->effectiveSystem($actor), $save, targetActorId: $actor->id)
                 : ['damage' => 0, 'steps' => ['Ação sem dano direto'], 'hit' => $attack['hit'] ?? null, 'attack' => $attack, 'pendingSave' => isset($message['save']) && $save === null, 'manual' => false]),
             'save' => $save,
             'application' => $operation ? ['operationId' => $operation->id, 'undone' => (bool) $operation->undone,
@@ -388,7 +388,7 @@ class DamageController extends Controller
             $hasDamage = collect($message['rolls'] ?? [])->contains('kind', 'damage');
             if ($hasDamage) {
                 $resolution = CombatRules::damage($message, $effectiveSystem, $save, isset($data['factor']) ? (float) $data['factor'] : null,
-                    $data['hitDecision'] ?? 'auto', $data['damageOverride'] ?? null);
+                    $data['hitDecision'] ?? 'auto', $data['damageOverride'] ?? null, $actor->id);
             } else {
                 $attack = CombatRules::attack($message, $effectiveSystem);
                 abort_if(($data['hitDecision'] ?? 'auto') !== 'auto' && ! $attack, 422, 'Esta ação não tem ataque.');

@@ -18,6 +18,7 @@ use App\Support\Dnd\EffectAudit;
 use App\Support\Dnd\HouseRules;
 use App\Support\Dnd\ResourceAudit;
 use App\Support\Dnd\ResourcePool;
+use App\Support\Dnd\Spellcasting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -57,6 +58,9 @@ final class SceneActionController extends Controller
         if ($targetTokenIds) {
             $hashInput[] = ['targetTokenIds' => $targetTokenIds];
         }
+        if (isset($data['spellCast'])) {
+            $hashInput[] = ['spellCast' => $data['spellCast']];
+        }
         $inputHash = hash('sha256', json_encode($hashInput, JSON_THROW_ON_ERROR));
         $existing = DB::table('action_records')->where(['scene_id' => $scene->id, 'user_id' => $request->user()->id, 'request_id' => $requestId])->first();
         if ($existing) {
@@ -67,7 +71,20 @@ final class SceneActionController extends Controller
 
             return response()->json(['message' => $scene->messageFor($request->user(), $previousMessage), 'actor' => $actor->toPayload(), 'state' => $scene->stateFor($request->user())]);
         }
-        $action = collect($actor->system['actions'] ?? [])->firstWhere('id', $data['actionId']);
+        $spellPlan = null;
+        $spellDocument = null;
+        if (str_starts_with($data['actionId'], 'spell:')) {
+            abort_unless(isset($data['spellCast']), 422, 'Revise as escolhas da conjuração antes de confirmar.');
+            $documentId = substr($data['actionId'], 6);
+            abort_unless(ctype_digit($documentId) && (int) $documentId > 0, 422, 'Magia inválida.');
+            $spellDocument = ActorDocument::query()->where('actor_id', $actor->id)->where('kind', 'spell')
+                ->findOrFail((int) $documentId);
+            $spellPlan = app(Spellcasting::class)->build($actor, $spellDocument, $data['spellCast']);
+            $action = $spellPlan['action'];
+        } else {
+            abort_unless(! isset($data['spellCast']), 422, 'Escolhas de conjuração exigem magia vinculada ao compêndio.');
+            $action = collect($actor->system['actions'] ?? [])->firstWhere('id', $data['actionId']);
+        }
         if (! $action) {
             abort(404, 'Ação não encontrada na ficha.');
         }
@@ -75,6 +92,45 @@ final class SceneActionController extends Controller
         CombatRules::validateAction($action);
         $actionSnapshot = $action;
         $actionRevision = (int) $actor->revision;
+        if ($spellPlan) {
+            $kind = $spellPlan['profile']['kind'];
+            if ($kind === 'area-save') {
+                abort_unless(! $targetActorIds && ! $targetTokenIds && ! isset($data['spellCast']['missiles']), 422,
+                    'Para a área, escolha apenas o centro do efeito.');
+                $centerId = $data['spellCast']['centerTokenId'] ?? null;
+                $visibleIds = array_column($scene->visibleTokensFor($request->user()), 'id');
+                abort_unless($centerId && in_array($centerId, $visibleIds, true), 403, 'O centro escolhido não está visível.');
+                $tokens = collect($scene->state['tokens'] ?? [])->keyBy('id');
+                $center = $tokens->get($centerId);
+                $source = $tokens->first(fn ($token) => (int) ($token['actorId'] ?? 0) === $actor->id);
+                abort_unless($center && $source, 422, 'Coloque o conjurador e o centro da área no mapa.');
+                $grid = max(1, (float) ($scene->state['grid']['size'] ?? 70));
+                abort_unless(hypot((float) $center['x'] - (float) $source['x'], (float) $center['y'] - (float) $source['y']) * 5 / $grid
+                    <= $action['rangeFeet'], 422, 'O centro da área está fora do alcance da magia.');
+                $seenActors = [];
+                foreach ($visibleIds as $tokenId) {
+                    $candidate = $tokens->get($tokenId);
+                    $id = (int) ($candidate['actorId'] ?? 0);
+                    if ($id > 0 && ! isset($seenActors[$id]) && hypot((float) $candidate['x'] - (float) $center['x'],
+                        (float) $candidate['y'] - (float) $center['y']) * 5 / $grid <= $spellPlan['profile']['areaFeet']) {
+                        $seenActors[$id] = $tokenId;
+                    }
+                }
+                abort_unless($seenActors && count($seenActors) <= 50, 422, 'A área precisa conter ao menos um token válido.');
+                $targetTokenIds = array_values($seenActors);
+            } elseif ($kind === 'missiles') {
+                abort_unless(! isset($data['spellCast']['centerTokenId']) && $targetTokenIds && ! $targetActorIds, 422,
+                    'Selecione os tokens que receberão os mísseis.');
+                $distribution = collect($data['spellCast']['missiles'] ?? []);
+                abort_unless($distribution->count() === count($targetTokenIds)
+                    && $distribution->sum('count') === 3 + $spellPlan['upcast']
+                    && $distribution->pluck('tokenId')->sort()->values()->all() === collect($targetTokenIds)->sort()->values()->all(),
+                    422, 'Distribua todos os mísseis entre os alvos selecionados.');
+            } else {
+                abort_unless(! isset($data['spellCast']['missiles']) && ! isset($data['spellCast']['centerTokenId']), 422,
+                    'A magia não aceita escolhas de área ou mísseis.');
+            }
+        }
         $targetTokensByActor = [];
         if ($targetTokenIds) {
             // Resolve public token handles inside the locked scene. The caller never
@@ -107,7 +163,8 @@ final class SceneActionController extends Controller
             $visibleIds[] = $actor->id;
             abort_unless(! array_diff($targetActorIds, $visibleIds), 403, 'O alvo não está disponível na sua visão da cena.');
         }
-        if (isset($action['rangeFeet']) && $targetActorIds && $targetMode !== 'self') {
+        if (isset($action['rangeFeet']) && $targetActorIds && $targetMode !== 'self'
+            && ($spellPlan['profile']['kind'] ?? null) !== 'area-save') {
             $tokens = collect($scene->state['tokens'] ?? []);
             $source = $tokens->first(fn ($token) => (int) ($token['actorId'] ?? 0) === $actor->id);
             abort_unless($source, 422, 'Coloque a ficha no mapa para medir o alcance.');
@@ -125,6 +182,14 @@ final class SceneActionController extends Controller
         $system = $actor->system;
         $effectiveSystem = $effects->effectiveSystem($actor);
         abort_unless(ConditionRules::canAct($effectiveSystem), 422, 'A condição atual impede o personagem de executar ações.');
+        if ($spellPlan) {
+            $conditions = ConditionRules::names($effectiveSystem);
+            abort_if($spellPlan['profile']['components']['v'] && array_intersect($conditions, ['silenced', 'silenciado']), 422,
+                'O conjurador não pode usar componentes verbais enquanto estiver silenciado.');
+            abort_if(($spellPlan['profile']['components']['s'] || $spellPlan['profile']['components']['m'])
+                && array_intersect($conditions, ['hands-bound', 'maos-presas']), 422,
+                'A magia exige as mãos livres para os componentes.');
+        }
         $activeEffects = $actor->activeEffects()->get();
         $targetSystemForAttack = null;
         $distanceForAttack = null;
@@ -219,6 +284,25 @@ final class SceneActionController extends Controller
                 ])];
                 $appliedRules = array_merge($appliedRules, $adjusted['rules']);
             }
+            if (($spellPlan['profile']['kind'] ?? null) === 'missiles') {
+                $tokenMap = collect($scene->state['tokens'] ?? [])->keyBy('id');
+                $missile = 0;
+                foreach ($data['spellCast']['missiles'] as $allocation) {
+                    $target = (int) $tokenMap->get($allocation['tokenId'])['actorId'];
+                    for ($i = 0; $i < $allocation['count']; $i++) {
+                        $adjusted = HouseRules::apply('1d4+1', $action['name'].' · míssil '.(++$missile), $scene->campaign->house_rules ?? []);
+                        $formula = $effects->applyFormulaModifier($adjusted['formula'], $activeEffects, 'roll.damage');
+                        $rolls[] = ['kind' => 'damage', 'damageType' => 'force', 'targetActorId' => $target,
+                            ...$ledger->roll($scene, $request->user(), [
+                                'requestId' => $requestId, 'step' => 'missile:'.$missile, 'context' => 'damage',
+                                'actorId' => $actor->id, 'formula' => $formula,
+                                'label' => $actor->name.' · '.$action['name'].' · míssil '.$missile,
+                                'houseRules' => $adjusted['rules'], 'visibility' => $action['visibility'] ?? 'public',
+                            ])];
+                        $appliedRules = array_merge($appliedRules, $adjusted['rules']);
+                    }
+                }
+            }
         } catch (InvalidArgumentException $e) {
             // Throw, never return: any earlier attack roll must roll back if a
             // later step (damage/healing) has an invalid formula.
@@ -296,7 +380,19 @@ final class SceneActionController extends Controller
             'targetMode' => $targetMode,
             'effectIds' => $effectIds,
             'effect' => $actionEffect,
-            'sourceDocumentId' => $document?->id,
+            'sourceDocumentId' => $spellDocument?->id ?? $document?->id,
+            'spellCast' => $spellPlan ? [
+                'documentId' => $spellDocument->id, 'name' => $spellPlan['profile']['name'],
+                'edition' => $spellPlan['profile']['edition'], 'source' => $spellPlan['profile']['source'],
+                'level' => $spellPlan['profile']['level'], 'slotLevel' => $spellPlan['slotLevel'],
+                'ritual' => $spellPlan['ritual'], 'upcast' => $spellPlan['upcast'],
+                'components' => $spellPlan['profile']['components'],
+                'componentsConfirmed' => $data['spellCast']['componentsConfirmed'] ?? false,
+                'kind' => $spellPlan['profile']['kind'],
+                'areaCenterTokenId' => $data['spellCast']['centerTokenId'] ?? null,
+                'areaFeet' => $spellPlan['profile']['areaFeet'],
+                'missiles' => $data['spellCast']['missiles'] ?? null,
+            ] : null,
             'rolls' => $rolls,
             'label' => $actor->name.' · '.$action['name']
                 .($slotLevel !== null ? ' · espaço nível '.$slotLevel.' consumido' : '')

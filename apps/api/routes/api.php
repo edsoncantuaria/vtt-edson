@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\ActorDeathSaveController;
 use App\Http\Controllers\Api\ActorDocumentController;
 use App\Http\Controllers\Api\ActorResourceController;
 use App\Http\Controllers\Api\ActorRestController;
+use App\Http\Controllers\Api\ActorSpellController;
 use App\Http\Controllers\Api\AdventureImportController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CampaignAssetController;
@@ -172,6 +173,7 @@ Route::middleware(['auth:sanctum', SerializeSceneWrites::class])->group(function
     Route::post('/actors/{actor}/rest', [ActorRestController::class, 'store']);
     Route::get('/actors/{actor}/resources', [ActorResourceController::class, 'index']);
     Route::post('/actors/{actor}/resources/adjust', [ActorResourceController::class, 'adjust']);
+    Route::get('/actors/{actor}/spells', [ActorSpellController::class, 'index']);
     Route::get('/actors/{actor}/documents', [ActorDocumentController::class, 'index']);
     Route::post('/actors/{actor}/documents', [ActorDocumentController::class, 'store']);
     Route::patch('/actor-documents/{actorDocument}', [ActorDocumentController::class, 'update']);

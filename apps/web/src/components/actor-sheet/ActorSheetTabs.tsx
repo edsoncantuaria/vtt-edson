@@ -15,6 +15,9 @@ import { useSession } from "../../store/session";
 import { Icon } from "../Icon";
 import { ResourcePoolStrip } from "./ResourcePoolStrip";
 import { unavailableResource } from "../../lib/resourceAvailability";
+import { useEffect, useState } from "react";
+import type { SpellCastChoice, SpellOption } from "../../lib/spellcasting";
+import { SpellCastDialog } from "./SpellCastDialog";
 
 const ABILITIES: Ability[] = ["str", "dex", "con", "int", "wis", "cha"];
 const ECONOMY_ORDER = ["action", "bonus", "reaction", "other"] as const;
@@ -431,11 +434,33 @@ export function SpellsTab({
   canEdit: boolean;
   busy: boolean;
   change: ChangeActor;
-  executeAction: (actionId: string) => Promise<void>;
+  executeAction: (
+    actionId: string,
+    spellCast?: SpellCastChoice,
+    tokenIds?: string[],
+  ) => Promise<void>;
   onEdit: () => void;
 }) {
   const upsertActor = useSession((state) => state.upsertActor);
   const setError = useSession((state) => state.setError);
+  const [guided, setGuided] = useState<SpellOption[]>([]);
+  const [casting, setCasting] = useState<SpellOption | null>(null);
+  const visibleTokens = useSession((state) => state.state.tokens);
+  const selectedTokenIds = useSession((state) => state.targetTokenIds);
+  useEffect(() => {
+    let active = true;
+    void api<{ spells: SpellOption[] }>(`/actors/${actor.id}/spells`)
+      .then((response) => {
+        if (active) setGuided(response.spells);
+      })
+      .catch((error) => {
+        if (active && canEdit)
+          setError(error instanceof Error ? error.message : "Não foi possível consultar magias.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [actor.id, actor.revision, canEdit, setError]);
   async function updateDocument(documentId: number, prepared: boolean) {
     try {
       const result = await api<{ actor: Actor }>(`/actor-documents/${documentId}`, {
@@ -474,6 +499,7 @@ export function SpellsTab({
         const slot = castAction?.spellSlotLevel
           ? actor.system.spells.slots[String(castAction.spellSlotLevel)]
           : null;
+        const profile = guided.find((entry) => entry.documentId === document?.id);
         return (
           <article key={spell.id}>
             <div>
@@ -481,7 +507,25 @@ export function SpellsTab({
               <small>{spell.level === 0 ? "Truque" : `${spell.level}º círculo`}</small>
             </div>
             {spell.description && <p>{spell.description}</p>}
-            {castAction ? (
+            {profile ? (
+              <>
+                <small>
+                  {profile.edition} · {profile.source} · {profile.rangeFeet} pés
+                  {profile.concentration ? " · concentração" : ""}
+                  {profile.ritual ? " · ritual" : ""}
+                </small>
+                <button
+                  className="primary"
+                  disabled={!canEdit || busy || (!profile.canCast && !profile.canRitual)}
+                  onClick={() => setCasting(profile)}
+                >
+                  <Icon name="spark" size={15} /> Conjurar {spell.name}
+                </button>
+                {!profile.canCast && !profile.canRitual && (
+                  <small role="status">Prepare esta magia antes de conjurar.</small>
+                )}
+              </>
+            ) : castAction ? (
               <button
                 className="primary"
                 disabled={
@@ -518,6 +562,17 @@ export function SpellsTab({
           </article>
         );
       })}
+      {casting && (
+        <SpellCastDialog
+          actor={actor}
+          spell={casting}
+          tokens={visibleTokens}
+          selectedTokenIds={selectedTokenIds}
+          busy={busy}
+          onClose={() => setCasting(null)}
+          onCast={(choice, tokenIds) => executeAction(casting.actionId, choice, tokenIds)}
+        />
+      )}
     </div>
   );
 }

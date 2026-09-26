@@ -180,10 +180,15 @@ final class CombatRules
         ];
     }
 
-    public static function damage(array $message, array $system, ?array $save, ?float $override = null, string $hitDecision = 'auto', ?int $damageOverride = null): array
+    public static function damage(array $message, array $system, ?array $save, ?float $override = null, string $hitDecision = 'auto', ?int $damageOverride = null, ?int $targetActorId = null): array
     {
         abort_unless(in_array($hitDecision, ['auto', 'hit', 'miss'], true), 422, 'Decisão de ataque inválida.');
-        $rolls = collect($message['rolls'] ?? [])->where('kind', 'damage')->values()->all();
+        $rolls = collect($message['rolls'] ?? [])->where('kind', 'damage');
+        if (($message['spellCast']['kind'] ?? null) === 'missiles') {
+            abort_unless($targetActorId !== null, 422, 'Selecione o alvo registrado para resolver os mísseis.');
+            $rolls = $rolls->where('targetActorId', $targetActorId);
+        }
+        $rolls = $rolls->values()->all();
         abort_unless($rolls, 422, 'Esta ação não contém dano.');
         $steps = [];
         $attack = self::attack($message, $system);

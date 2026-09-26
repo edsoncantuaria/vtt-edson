@@ -4,6 +4,7 @@ import { ActorEffectsTab } from "./ActorEffectsTab";
 import { ActionsTab, AttributesTab, EquipmentTab, SpellsTab, StoryTab } from "./ActorSheetTabs";
 import { ACTOR_SHEET_TABS, type ActorSheetTab } from "./actorSheetTypes";
 import { actorConditions, conditionLabel } from "../../lib/conditions";
+import type { SpellCastChoice } from "../../lib/spellcasting";
 
 export function ActorQuickSheet({
   actor,
@@ -40,7 +41,11 @@ export function ActorQuickSheet({
   roll: (formula: string, label: string) => Promise<void>;
   rollDeathSave: () => Promise<void>;
   change: (change: (system: ActorSystem) => void) => Promise<void>;
-  executeAction: (actionId: string) => Promise<void>;
+  executeAction: (
+    actionId: string,
+    spellCast?: SpellCastChoice,
+    tokenIds?: string[],
+  ) => Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
 }) {

@@ -175,6 +175,24 @@ export function ChatPanel() {
                     Origem: {m.actionOrigin} · revisão da ficha {m.actionRevision ?? "legada"}
                   </small>
                 )}
+                {m.type === "action" && m.spellCast && (
+                  <small className="roll-tag">
+                    {m.spellCast.name} · {m.spellCast.edition} · {m.spellCast.source} ·{" "}
+                    {m.spellCast.ritual
+                      ? "ritual sem espaço (+10 minutos)"
+                      : m.spellCast.slotLevel != null
+                        ? `espaço de nível ${m.spellCast.slotLevel}`
+                        : "truque"}
+                    {m.spellCast.upcast > 0 ? ` · upcast +${m.spellCast.upcast}` : ""}
+                    {m.spellCast.missiles?.length
+                      ? ` · mísseis ${m.spellCast.missiles.map((item) => item.count).join("+")}`
+                      : ""}
+                    {m.spellCast.areaFeet != null
+                      ? ` · área: raio ${m.spellCast.areaFeet} pés`
+                      : ""}
+                    {m.spellCast.componentsConfirmed ? " · material confirmado" : ""}
+                  </small>
+                )}
                 {m.type === "roll" && m.text && m.text !== m.detail && (
                   <p className="roll-outcome">{m.text}</p>
                 )}

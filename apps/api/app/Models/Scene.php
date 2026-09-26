@@ -123,6 +123,25 @@ class Scene extends Model
             $visibleTokenIds ??= array_column($this->visibleTokensFor($user), 'id');
             $message['targetTokenIds'] = array_values(array_intersect($message['targetTokenIds'], $visibleTokenIds));
         }
+        if (($message['spellCast']['kind'] ?? null) === 'missiles') {
+            $visibleTokenIds ??= array_column($this->visibleTokensFor($user), 'id');
+            $message['spellCast']['missiles'] = array_values(array_filter($message['spellCast']['missiles'] ?? [],
+                fn ($missile) => in_array($missile['tokenId'] ?? null, $visibleTokenIds, true)));
+            if (isset($message['rolls'])) {
+                foreach ($message['rolls'] as &$roll) {
+                    if (isset($roll['targetActorId']) && ! in_array($roll['targetActorId'], $readable, true)) {
+                        unset($roll['targetActorId']);
+                    }
+                }
+                unset($roll);
+            }
+        }
+        if (isset($message['spellCast']['areaCenterTokenId'])) {
+            $visibleTokenIds ??= array_column($this->visibleTokensFor($user), 'id');
+            if (! in_array($message['spellCast']['areaCenterTokenId'], $visibleTokenIds, true)) {
+                unset($message['spellCast']['areaCenterTokenId']);
+            }
+        }
 
         return $message;
     }

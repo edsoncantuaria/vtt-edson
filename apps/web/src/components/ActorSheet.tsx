@@ -4,6 +4,7 @@ import { CharacterImportSchema, buildModifierFormula } from "@vtt/core";
 import { api, ApiError } from "../lib/api";
 import { rollToChat } from "../lib/roll";
 import { executeActorAction } from "../lib/actorAction";
+import type { SpellCastChoice } from "../lib/spellcasting";
 import { pluginRegistry } from "../lib/plugins";
 import { isManagerRole, useSession } from "../store/session";
 import { Icon } from "./Icon";
@@ -158,10 +159,16 @@ export function ActorSheet() {
       setBusy(false);
     }
   }
-  async function executeAction(actionId: string) {
+  async function executeAction(
+    actionId: string,
+    spellCast?: SpellCastChoice,
+    spellTokens?: string[],
+  ) {
     if (!actor || !sceneId || busy) return;
     setBusy(true);
-    const key = `${sceneId}:${actor.id}:${actionId}:${mode}:${targetTokenIds.join(",")}:${targetActorIds.join(",")}`;
+    const chosenTokens = spellTokens ?? targetTokenIds;
+    const chosenActors = spellTokens !== undefined ? [] : targetActorIds;
+    const key = `${sceneId}:${actor.id}:${actionId}:${mode}:${chosenTokens.join(",")}:${chosenActors.join(",")}:${JSON.stringify(spellCast ?? null)}`;
     if (actionRequest.current?.key !== key)
       actionRequest.current = { key, id: crypto.randomUUID() };
     try {
@@ -176,8 +183,9 @@ export function ActorSheet() {
         actionId,
         actionRequest.current.id,
         mode,
-        targetActorIds,
-        targetTokenIds,
+        chosenActors,
+        chosenTokens,
+        spellCast,
       );
       const message = (result as { message?: { id?: unknown } }).message;
       await pluginRegistry.hooks.emit("action:after", {
@@ -189,6 +197,7 @@ export function ActorSheet() {
       actionRequest.current = null;
     } catch (e) {
       report(e);
+      if (spellCast) throw e;
     } finally {
       setBusy(false);
     }
