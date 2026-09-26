@@ -1,0 +1,13 @@
+# A. Preparar a campanha
+
+[Índice](README.md) · [Próximo: grupo](02-grupo.md)
+
+| ID | Ator, gatilho e superfície de UI | Estado persistido, transição e autorização | Falha recuperável / recarga |
+| --- | --- | --- | --- |
+| G01 Criar campanha | GM → Lobby → Criar uma mesa → nome e edição. | `Campaign` + `Room`/código e GM membro; `Inexistente → Criada`; só GM pode configurar. Entrada: `Lobby.tsx`; API `POST /rooms`, `RoomController.php`. | Nome inválido explica correção; repetir não deve criar duplicata após timeout; refresh retorna à mesa criada. |
+| G02 Selecionar fontes | GM → Biblioteca da campanha → pesquisar/alternar fontes permitidas, com nomes completos e revisão/edição. | Seleção de fontes vinculada à campanha; `Padrão → Configurada`; jogador consulta somente conteúdo autorizado. API `GET/PUT /campaigns/{campaign}/catalog-sources`. | Fonte ausente/incompatível é explicada; erro de gravação não altera seleção exibida; refresh mostra a versão salva. |
+| G03 Criar/importar aventura | GM → Importar aventura ou Criar manualmente → prévia, capítulos, mapas/recursos e confirmação. | Aventura organizada em pasta/ordem e referências de catálogo, com provenance e conteúdos em preparação. API de `AdventureImportController.php`; criação manual usa cenas/journals. **Lacuna:** verificar modelo de aventura/encerramento unificado e vínculos persistidos. | Conteúdo/arte ausente é marcado para preparação manual, sem paredes arbitrárias; importação parcial é explicada/retomável; recarga conserva o que foi confirmado. |
+| G04 Preparar cenas | GM → painel de cenas → escolher mapa, escala, grid, paredes/portas, iluminação, notas, pins, encounters e ordenar. | `Scene` e estado de mapa/objetos vinculados à aventura/campanha; `Nova → Preparada`. Só GM/delegado; player não acessa geometria secreta. API `CampaignSceneController`, `SceneGeometryController`, `SceneTokenController`, `JournalController`. | Rejeições de imagem e conflito são acionáveis; autosave mostra revisão; refresh mantém ordem, mapa e objetos. |
+| G05 Publicar/ativar | GM → Cena → Publicar e depois Ativar para o grupo (ações distintas). | Publicação decide quem pode ler; cena ativa da mesa indica o local ao grupo. `Preparada → Publicada → Ativa`; **lacuna:** garantir troca local separada de ativação e migração opcional de token. | Player nunca recebe cena privada pelo payload/evento; falha de ativação preserva cena anterior; reload devolve apenas a cena ativa autorizada. |
+
+**Gate de saída:** GM encontra a primeira cena pronta pelo nome e consegue permitir a entrada do grupo sem copiar IDs internos ou compartilhar conteúdo secreto. Issues correlatas: #3, #4, #32, #39, #40.
