@@ -770,6 +770,14 @@
   color: var(--gold);
   font-size: 11px;
 }
+.roll-result .action-card-image {
+  display: block;
+  max-width: 90px;
+  max-height: 64px;
+  margin: 5px 0;
+  border-radius: 5px;
+  object-fit: cover;
+}
 .roll-result small {
   display: block;
   color: var(--ink-faint);

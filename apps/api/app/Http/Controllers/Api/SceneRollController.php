@@ -64,7 +64,7 @@ final class SceneRollController extends Controller
         $data = $request->validate([
             'requestId' => ['required', 'uuid'], 'formula' => ['required', 'string', 'max:120'],
             'actorId' => ['nullable', 'integer', Rule::exists('actors', 'id')->where('campaign_id', $scene->campaign_id)],
-            'context' => ['sometimes', 'in:custom,ability,skill,save,initiative,attack,damage,concentration'],
+            'context' => ['sometimes', 'in:custom,ability,skill,save,initiative,attack,damage,heal,concentration'],
             'mode' => ['sometimes', 'in:normal,advantage,disadvantage'],
             'modifier' => ['sometimes', 'integer', 'between:-100,100'],
             'extraDice' => ['sometimes', 'string', 'max:20'],

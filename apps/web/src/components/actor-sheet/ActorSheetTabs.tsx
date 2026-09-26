@@ -382,8 +382,17 @@ export function ActionsTab({
             <h4>{action.name}</h4>
             <small>
               {ECONOMY_LABEL[action.economy ?? "action"]} ·{" "}
-              {action.kind === "spell" ? "Magia" : "Ataque"} ·{" "}
-              {action.attackFormula ?? action.damageFormula}
+              {action.kind === "spell"
+                ? "Magia"
+                : action.kind === "feature"
+                  ? "Habilidade"
+                  : action.kind === "item"
+                    ? "Item"
+                    : "Ataque"}{" "}
+              ·{" "}
+              {[action.attackFormula, action.damageFormula, action.healingFormula]
+                .filter(Boolean)
+                .join(" · ") || "Efeito sem rolagem"}
             </small>
           </div>
           {action.saveAbility && (
@@ -397,6 +406,16 @@ export function ActionsTab({
             </small>
           )}
           {action.concentration && <small>Exige concentração; encerra a anterior.</small>}
+          {action.target && (
+            <small>
+              {action.target === "self"
+                ? "Alvo: próprio personagem"
+                : action.target === "single"
+                  ? "Um alvo obrigatório"
+                  : `Até ${action.maxTargets ?? 50} alvos obrigatórios`}
+              {action.rangeFeet != null ? ` · ${action.rangeFeet} pés` : ""}
+            </small>
+          )}
           {action.spellSlotLevel && (
             <small>Consome 1 espaço de nível {action.spellSlotLevel}.</small>
           )}
@@ -415,7 +434,11 @@ export function ActionsTab({
             onClick={() => void executeAction(action.id)}
           >
             <Icon name={action.kind === "spell" ? "spark" : "swords"} size={15} />
-            {action.kind === "spell" ? "Conjurar" : "Atacar"}
+            {action.kind === "spell"
+              ? "Conjurar"
+              : action.kind === "attack"
+                ? "Atacar"
+                : "Executar ação"}
           </button>
         </article>
       ))}

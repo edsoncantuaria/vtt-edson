@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { useSession } from "../store/session";
 import { updateScene } from "../lib/scene";
 import { DamageApplication } from "./DamageApplication";
+import { HealingApplication } from "./HealingApplication";
 import { UndoAction } from "./UndoAction";
 import { Icon } from "./Icon";
 import { PrivateChat } from "./PrivateChat";
@@ -134,6 +135,9 @@ export function ChatPanel() {
               <div className="roll-result">
                 <div>
                   <span>{m.label || (m.type === "action" ? "Ação" : "Rolagem de dados")}</span>
+                  {m.imageUrl && (
+                    <img className="action-card-image" src={m.imageUrl} alt="" loading="lazy" />
+                  )}
                   <code>{m.formula}</code>
                   <small>{m.detail}</small>
                   {m.rollId && (
@@ -141,13 +145,16 @@ export function ChatPanel() {
                   )}
                 </div>
                 <strong className={m.critical ? "critical" : m.fumble ? "fumble" : ""}>
-                  {m.total}
+                  {m.type === "action" && !m.rolls?.length ? "Executada" : m.total}
                 </strong>
                 {m.rolls &&
                   m.rolls.length > 1 &&
                   m.rolls.slice(1).map((roll, index) => (
                     <div key={index}>
-                      <b>Dano: {roll.total}</b>
+                      <b>
+                        {roll.kind === "heal" ? "Cura" : roll.kind === "damage" ? "Dano" : "Ataque"}
+                        : {roll.total}
+                      </b>
                       <code>{roll.formula}</code>
                       <small>{roll.detail}</small>
                     </div>
@@ -169,9 +176,13 @@ export function ChatPanel() {
             ) : (
               <p>{m.text}</p>
             )}
-            {(m.save || m.rolls?.some((roll) => roll.kind === "damage")) && (
+            {(m.save ||
+              m.rolls?.some((roll) => roll.kind === "damage") ||
+              (m.effect &&
+                ["on-hit", "on-failed-save"].includes(m.effect.trigger ?? "on-use"))) && (
               <DamageApplication message={m} />
             )}
+            {m.rolls?.some((roll) => roll.kind === "heal") && <HealingApplication message={m} />}
             {m.type === "action" && m.sourceActorId && (
               <UndoAction messageId={m.id} actorId={m.sourceActorId} />
             )}

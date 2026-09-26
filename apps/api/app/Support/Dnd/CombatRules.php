@@ -16,6 +16,19 @@ final class CombatRules
     public static function validateAction(array $action): array
     {
         $validated = Validator::make($action, [
+            'id' => ['sometimes', 'string', 'min:1', 'max:80'],
+            'kind' => ['sometimes', Rule::in(['attack', 'spell', 'feature', 'item'])],
+            'name' => ['sometimes', 'string', 'min:1', 'max:120'],
+            'attackFormula' => ['sometimes', 'string', 'max:120'],
+            'damageFormula' => ['sometimes', 'string', 'max:120'],
+            'imageUrl' => ['sometimes', 'url', 'max:2048', 'starts_with:https://'],
+            'effectUrl' => ['sometimes', 'url', 'max:2048', 'starts_with:https://'],
+            'target' => ['sometimes', Rule::in(['self', 'single', 'multiple'])],
+            'maxTargets' => ['sometimes', 'integer', 'between:1,50'],
+            'rangeFeet' => ['sometimes', 'integer', 'between:0,10000'],
+            'economy' => ['sometimes', Rule::in(['action', 'bonus', 'reaction', 'other'])],
+            'healingFormula' => ['sometimes', 'string', 'max:120'],
+            'description' => ['sometimes', 'string', 'max:10000'],
             'saveAbility' => ['sometimes', Rule::in(self::ABILITIES)],
             'saveDc' => ['sometimes', 'integer', 'min:1', 'max:99'],
             'saveEffect' => ['required_with:saveAbility', Rule::in(['half', 'none'])],

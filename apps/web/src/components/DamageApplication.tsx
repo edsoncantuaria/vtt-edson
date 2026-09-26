@@ -63,7 +63,11 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
   const [status, setStatus] = useState("");
   const [opened, setOpened] = useState(false);
   const [targetConfirmed, setTargetConfirmed] = useState(false);
-  const editable = actors.filter((a) => isManagerRole(role) || a.ownerUserId === user?.id);
+  const editable = actors.filter(
+    (a) =>
+      (isManagerRole(role) || a.ownerUserId === user?.id) &&
+      (!message.targetMode || message.targetActorIds?.includes(a.id)),
+  );
   const mapTargets = targetActorIds
     .map((id) => editable.find((actor) => actor.id === id))
     .filter((actor): actor is Actor => !!actor);
@@ -302,7 +306,12 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
         )}
         {result?.preview && !applied && (
           <section>
-            <strong>Dano calculado: {result.preview.damage}</strong>
+            <strong>
+              {message.rolls?.some((roll) => roll.kind === "damage")
+                ? "Dano calculado"
+                : "Efeito da ação"}
+              : {result.preview.damage} PV de dano
+            </strong>
             {result.preview.attack && (
               <div className="resolution-result" role="status">
                 <strong>
@@ -351,11 +360,12 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
                 void execute(
                   "",
                   factor === "auto" ? {} : { factor, reason },
-                  `Dano aplicado a ${selectedTarget?.name ?? "alvo"}.`,
+                  `Resolução confirmada para ${selectedTarget?.name ?? "alvo"}.`,
                 )
               }
             >
-              Confirmar dano em {selectedTarget?.name ?? "alvo"}
+              Confirmar {message.rolls?.some((roll) => roll.kind === "damage") ? "dano" : "efeito"}{" "}
+              em {selectedTarget?.name ?? "alvo"}
             </button>
           </section>
         )}

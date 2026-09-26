@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ActorResourceSchema, ActorSystemSchema, abilityModifier, emptyActorSystem, formatModifier } from './dnd'
+import { ActorActionSchema, ActorResourceSchema, ActorSystemSchema, abilityModifier, emptyActorSystem, formatModifier } from './dnd'
 
 describe('abilityModifier', () => {
   it('segue a tabela padrão 5e', () => {
@@ -38,6 +38,19 @@ describe('emptyActorSystem', () => {
 })
 
 describe('invariantes do estado de jogo', () => {
+  it('contrato único aceita cura, alvos, alcance e ação sem rolagem, mas rejeita URLs inseguras', () => {
+    const healing = {
+      id: 'heal', name: 'Cura', kind: 'spell', healingFormula: '1d8+3',
+      target: 'multiple', maxTargets: 3, rangeFeet: 30, economy: 'action', imageUrl: 'https://example.test/icon.png',
+    }
+    expect(ActorActionSchema.safeParse(healing).success).toBe(true)
+    expect(ActorActionSchema.safeParse({ id: 'ward', name: 'Ward', kind: 'feature', effect: {
+      name: 'Guard', target: 'self', trigger: 'on-use', duration: { unit: 'rounds', remaining: 1 }, modifiers: [], conditions: ['guarded'],
+    } }).success).toBe(true)
+    expect(ActorActionSchema.safeParse({ ...healing, rangeFeet: -1 }).success).toBe(false)
+    expect(ActorActionSchema.safeParse({ ...healing, maxTargets: 51 }).success).toBe(false)
+    expect(ActorActionSchema.safeParse({ ...healing, imageUrl: 'http://example.test/icon.png' }).success).toBe(false)
+  })
   it('não permite PV negativos, acima do máximo nem PV temporários negativos', () => {
     const system = emptyActorSystem()
     expect(ActorSystemSchema.safeParse({ ...system, hp: { value: 11, max: 10, temp: 0 } }).success).toBe(false)

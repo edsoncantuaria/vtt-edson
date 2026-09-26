@@ -3,7 +3,7 @@ import type { Actor, ActorSystem } from "@vtt/core";
 import { CharacterImportSchema, buildModifierFormula } from "@vtt/core";
 import { api, ApiError } from "../lib/api";
 import { rollToChat } from "../lib/roll";
-import { updateScene } from "../lib/scene";
+import { executeActorAction } from "../lib/actorAction";
 import { pluginRegistry } from "../lib/plugins";
 import { isManagerRole, useSession } from "../store/session";
 import { Icon } from "./Icon";
@@ -164,13 +164,14 @@ export function ActorSheet() {
         actorId: actor.id,
         actionId,
       });
-      const result = await updateScene(sceneId, "/actions", {
-        actorId: actor.id,
+      const result = await executeActorAction(
+        sceneId,
+        actor,
         actionId,
-        requestId: actionRequest.current.id,
+        actionRequest.current.id,
         mode,
         targetActorIds,
-      });
+      );
       const message = (result as { message?: { id?: unknown } }).message;
       await pluginRegistry.hooks.emit("action:after", {
         sceneId,

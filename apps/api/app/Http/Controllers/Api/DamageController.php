@@ -67,9 +67,17 @@ class DamageController extends Controller
         $save = $record ? (json_decode($record->saves ?? '{}', true)[$actor->id] ?? null) : null;
         $operation = DB::table('damage_applications')->where($this->key($scene, $actor, $messageId))->first();
         $hasDamage = collect($message['rolls'] ?? [])->contains('kind', 'damage');
+        $effect = $message['effect'] ?? null;
+        $needsResolution = $hasDamage || isset($message['save']) || (is_array($effect) && in_array($effect['trigger'] ?? 'on-use', ['on-hit', 'on-failed-save'], true));
+        if ($message['targetMode'] ?? null) {
+            abort_unless(in_array($actor->id, $message['targetActorIds'] ?? [], true), 422, 'Este ator não pertence aos alvos confirmados da ação.');
+        }
+        $attack = $needsResolution && ! $hasDamage ? CombatRules::attack($message, $this->effects->effectiveSystem($actor)) : null;
 
         return response()->json([
-            'preview' => $hasDamage ? CombatRules::damage($message, $this->effects->effectiveSystem($actor), $save) : null,
+            'preview' => ! $needsResolution ? null : ($hasDamage
+                ? CombatRules::damage($message, $this->effects->effectiveSystem($actor), $save)
+                : ['damage' => 0, 'steps' => ['Ação sem dano direto'], 'hit' => $attack['hit'] ?? null, 'attack' => $attack, 'pendingSave' => isset($message['save']) && $save === null, 'manual' => false]),
             'save' => $save,
             'application' => $operation ? ['undone' => (bool) $operation->undone, 'before' => json_decode($operation->before, true), 'after' => json_decode($operation->after, true), 'resolution' => json_decode($operation->resolution ?? '{}', true)] : null,
             'actionUndone' => (bool) ($record->undone ?? false),
@@ -91,6 +99,9 @@ class DamageController extends Controller
             'reason' => ['required_if:decision,success,failure', 'string', 'max:240'],
         ]);
         [$message, $record] = $this->source($scene, $messageId);
+        if ($message['targetMode'] ?? null) {
+            abort_unless(in_array($actor->id, $message['targetActorIds'] ?? [], true), 422, 'Este ator não pertence aos alvos confirmados da ação.');
+        }
         abort_unless($record && isset($message['save']) && ! $record->undone, 422, 'Esta ação não tem salvaguarda pendente.');
         $saves = json_decode($record->saves ?? '{}', true);
         $previous = $saves[$actor->id] ?? null;
@@ -171,6 +182,9 @@ class DamageController extends Controller
             }
         } elseif (! $operation) {
             [$message, $record] = $this->source($scene, $messageId);
+            if ($message['targetMode'] ?? null) {
+                abort_unless(in_array($actor->id, $message['targetActorIds'] ?? [], true), 422, 'Este ator não pertence aos alvos confirmados da ação.');
+            }
             abort_if($record?->undone, 409, 'Esta ação foi desfeita.');
             $save = $record ? (json_decode($record->saves ?? '{}', true)[$actor->id] ?? null) : null;
             $effectiveSystem = $this->effects->apply($system, $actor->activeEffects()->get());
@@ -293,6 +307,7 @@ class DamageController extends Controller
         abort_unless($record && (int) $record->actor_id === $actor->id, 422);
         if (! $record->undone) {
             abort_if(DB::table('damage_applications')->where(['scene_id' => $scene->id, 'message_id' => $messageId, 'undone' => false])->exists(), 409, 'Desfaça o dano de todos os alvos primeiro.');
+            abort_if(DB::table('action_healing_applications')->where(['scene_id' => $scene->id, 'message_id' => $messageId, 'undone' => false])->exists(), 409, 'Desfaça a cura confirmada de todos os alvos primeiro.');
             $system = $actor->system;
             $after = json_decode($record->resource_after, true);
             $before = json_decode($record->resource_before, true);

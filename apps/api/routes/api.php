@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\ActionHealingController;
 use App\Http\Controllers\Api\ActiveEffectController;
 use App\Http\Controllers\Api\ActorAdvancementController;
 use App\Http\Controllers\Api\ActorController;
@@ -150,6 +151,8 @@ Route::middleware(['auth:sanctum', SerializeSceneWrites::class])->group(function
     Route::post('/scenes/{scene}/damage/{messageId}/save', [DamageController::class, 'save']);
     Route::post('/scenes/{scene}/damage/{messageId}/concentration', [DamageController::class, 'concentration']);
     Route::post('/scenes/{scene}/actions/{messageId}/undo', [DamageController::class, 'undoAction']);
+    Route::get('/scenes/{scene}/actions/{messageId}/heal', [ActionHealingController::class, 'show']);
+    Route::post('/scenes/{scene}/actions/{messageId}/heal', [ActionHealingController::class, 'store']);
     Route::post('/scenes/{scene}/damage/{messageId}', [DamageController::class, 'store']);
     Route::get('/scenes/{scene}/actions', [DamageController::class, 'history']);
     Route::post('/scenes/{scene}/actions', [SceneActionController::class, 'action']);

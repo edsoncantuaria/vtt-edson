@@ -213,12 +213,14 @@ function ActionEditor({
             value={action.kind}
             onChange={(event) =>
               mutate((next) => {
-                next.actions[index].kind = event.target.value as "attack" | "spell";
+                next.actions[index].kind = event.target.value as ActorAction["kind"];
               })
             }
           >
             <option value="attack">Ataque</option>
             <option value="spell">Magia</option>
+            <option value="feature">Habilidade</option>
+            <option value="item">Item</option>
           </select>
         </label>
         <button
@@ -259,6 +261,89 @@ function ActionEditor({
             }
           />
         </label>
+      </div>
+      <div className="editor-grid">
+        <label>
+          Fórmula de cura
+          <input
+            value={action.healingFormula ?? ""}
+            placeholder="1d8+3"
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].healingFormula = event.target.value || undefined;
+              })
+            }
+          />
+        </label>
+        <label>
+          Imagem HTTPS (opcional)
+          <input
+            type="url"
+            value={action.imageUrl ?? ""}
+            placeholder="https://…"
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].imageUrl = event.target.value || undefined;
+              })
+            }
+          />
+        </label>
+      </div>
+      <div className="editor-grid">
+        <label>
+          Alvos
+          <select
+            value={action.target ?? ""}
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].target = event.target.value
+                  ? (event.target.value as ActorAction["target"])
+                  : undefined;
+              })
+            }
+          >
+            <option value="">Legado · seleção livre</option>
+            <option value="self">A própria ficha</option>
+            <option value="single">Um alvo</option>
+            <option value="multiple">Vários alvos</option>
+          </select>
+        </label>
+        {action.target === "multiple" && (
+          <label>
+            Máximo de alvos
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={action.maxTargets ?? 2}
+              onChange={(event) =>
+                mutate((next) => {
+                  next.actions[index].maxTargets = Math.min(
+                    50,
+                    Math.max(1, Number(event.target.value)),
+                  );
+                })
+              }
+            />
+          </label>
+        )}
+        {action.target !== "self" && (
+          <label>
+            Alcance em pés (vazio = decisão da mesa)
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              value={action.rangeFeet ?? ""}
+              onChange={(event) =>
+                mutate((next) => {
+                  next.actions[index].rangeFeet =
+                    event.target.value === "" ? undefined : Math.max(0, Number(event.target.value));
+                })
+              }
+            />
+          </label>
+        )}
       </div>
       <div className="editor-grid">
         <label>

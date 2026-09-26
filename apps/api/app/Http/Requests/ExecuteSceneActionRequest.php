@@ -20,6 +20,7 @@ final class ExecuteSceneActionRequest extends FormRequest
             'actorId' => ['required', 'integer', Rule::exists('actors', 'id')->where('campaign_id', $campaignId)],
             'actionId' => ['required', 'string', 'max:80'],
             'mode' => ['sometimes', 'in:normal,advantage,disadvantage'],
+            // Legacy clients may omit the key; current UI always supplies it.
             'requestId' => ['sometimes', 'uuid'],
             'targetActorIds' => ['sometimes', 'array', 'max:50'],
             'targetActorIds.*' => ['integer', 'distinct', Rule::exists('actors', 'id')->where('campaign_id', $campaignId)],

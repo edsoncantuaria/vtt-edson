@@ -29,7 +29,7 @@ final class RollLedger
         $extra = trim($input['extraDice'] ?? '');
         if (! in_array($mode, ['normal', 'advantage', 'disadvantage'], true)
             || ! in_array($visibility, ['public', 'gm', 'private'], true)
-            || ! in_array($input['context'], ['custom', 'ability', 'skill', 'save', 'death-save', 'initiative', 'attack', 'damage', 'concentration'], true)
+            || ! in_array($input['context'], ['custom', 'ability', 'skill', 'save', 'death-save', 'initiative', 'attack', 'damage', 'heal', 'concentration'], true)
             || ! is_int($modifier) || abs($modifier) > 100
             || ! preg_match('/^[\w:-]{1,80}$/', $step)) {
             throw new InvalidArgumentException('Opções de rolagem inválidas.');

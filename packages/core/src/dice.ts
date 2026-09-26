@@ -60,7 +60,7 @@ export function isValidDiceFormula(formula: string): boolean {
 export const RollRecordSchema = z.object({
   id: z.string().uuid(), sceneId: z.number().int(), actorId: z.number().int().nullable(),
   userId: z.number().int(), recipientUserId: z.number().int().nullable(),
-  context: z.enum(['custom','ability','skill','save','death-save','initiative','attack','damage','concentration']),
+  context: z.enum(['custom','ability','skill','save','death-save','initiative','attack','damage','heal','concentration']),
   edition: z.enum(['5e-2014','5e-2024']),
   step: z.string(), mode: z.enum(['normal','advantage','disadvantage']),
   visibility: z.enum(['public','gm','private']), label: z.string().nullable(),

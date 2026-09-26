@@ -25,7 +25,8 @@ export function RollFeedbackCard({
         <small>{message.detail || message.rolls?.[0]?.detail}</small>
         {message.rolls?.slice(1).map((roll) => (
           <small key={roll.id ?? `${roll.kind}:${roll.formula}`}>
-            Dano: {roll.detail} · {roll.total}
+            {roll.kind === "heal" ? "Cura" : roll.kind === "damage" ? "Dano" : "Ataque"}:{" "}
+            {roll.detail} · {roll.total}
           </small>
         ))}
         {message.critical && <b className="roll-tag">20 natural · crítico</b>}

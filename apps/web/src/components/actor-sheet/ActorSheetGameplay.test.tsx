@@ -3,6 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ActorSchema, emptyActorSystem, type Actor } from "@vtt/core";
 import { ActorQuickSheet } from "./ActorQuickSheet";
 import { AttributesTab, SpellsTab } from "./ActorSheetTabs";
+import { ActionsTab } from "./ActorSheetTabs";
+import { HealingApplication } from "../HealingApplication";
+import { healingTargets } from "../../lib/healingTargets";
+import type { ChatMessage } from "@vtt/core";
 
 const noop = () => {};
 const noopAsync = async () => {};
@@ -22,6 +26,80 @@ function character(): Actor {
 }
 
 describe("Ficha em modo de jogo", () => {
+  it("mostra ações de cura e habilidade sem exigir IDs nem edição técnica", () => {
+    const actor = character();
+    actor.system.actions = [
+      {
+        id: "heal",
+        name: "Cura",
+        kind: "spell",
+        healingFormula: "1d8+3",
+        target: "single",
+        rangeFeet: 30,
+      },
+      {
+        id: "ward",
+        name: "Proteger",
+        kind: "feature",
+        effect: {
+          name: "Guard",
+          target: "self",
+          trigger: "on-use",
+          duration: { unit: "rounds", remaining: 1 },
+          modifiers: [],
+          conditions: [],
+        },
+      },
+    ];
+    const html = renderToStaticMarkup(
+      <ActionsTab
+        actor={actor}
+        canEdit
+        busy={false}
+        change={noopAsync}
+        executeAction={noopAsync}
+      />,
+    );
+    expect(html).toContain("1d8+3");
+    expect(html).toContain("Um alvo obrigatório");
+    expect(html).toContain("Habilidade");
+    expect(html).toContain("Executar ação");
+  });
+
+  it("oferece confirmação de cura na ficha acessível ao dono do alvo ou GM", () => {
+    const actor = character();
+    expect(healingTargets([actor], [actor.id], "gm", 12)).toEqual([actor]);
+    expect(healingTargets([actor], [actor.id], "player", actor.ownerUserId ?? undefined)).toEqual([
+      actor,
+    ]);
+    expect(healingTargets([actor], [actor.id], "player", 999)).toEqual([]);
+    expect(healingTargets([actor], [actor.id], "observer", actor.ownerUserId ?? undefined)).toEqual(
+      [],
+    );
+    const message: ChatMessage = {
+      id: "m1",
+      type: "action",
+      userId: 3,
+      userName: "Mestre",
+      createdAt: "2026-09-26T13:00:00Z",
+      sourceActorId: actor.id,
+      targetActorIds: [actor.id],
+      rolls: [
+        {
+          id: "43fa9151-0e32-43e5-90ef-cbc4c5fe0c10",
+          kind: "heal",
+          formula: "1d8+3",
+          total: 7,
+          detail: "4+3",
+          critical: false,
+          fumble: false,
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(<HealingApplication message={message} />);
+    expect(html).toContain("Resolver cura");
+    expect(html).not.toContain("Aplicar cura"); // preview is obtained from the server first
+  });
   it("permite rolar atributos, salvaguardas, perícias e iniciativa sem abrir o editor", () => {
     const html = renderToStaticMarkup(
       <AttributesTab
