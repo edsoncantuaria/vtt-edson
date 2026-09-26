@@ -107,6 +107,8 @@ class ActorController extends Controller
             if (isset($data['system'])) {
                 abort_unless($data['revision'] === $actor->revision, 409, 'A ficha mudou. Recarregue antes de salvar para preservar as ações da mesa.');
                 $this->systemValidator->validate($request);
+                abort_if($actor->type === 'character' && (int) data_get($data['system'], 'bio.level', 1) !== (int) data_get($actor->system, 'bio.level', 1), 422,
+                    'Use Evoluir personagem para subir de nível; a edição manual da ficha não registra evolução.');
                 $actor->system = $data['system'];
             }
             if (array_key_exists('shared', $data)) {

@@ -57,17 +57,9 @@ export function EssentialsSection({
               }
             />
           </label>
-          <NumberField
-            label="Nível"
-            min={1}
-            max={20}
-            value={system.bio.level}
-            onChange={(value) =>
-              mutate((next) => {
-                next.bio.level = value;
-              })
-            }
-          />
+          <p>
+            Nível: {system.bio.level}. Para mudar, use <b>Evoluir personagem</b> na ficha.
+          </p>
         </div>
       </EditorSection>
       <EditorSection title="Vitalidade e defesa">

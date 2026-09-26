@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import { isManagerRole, useSession } from "../store/session";
 import type { CatalogEntry } from "../lib/catalog";
 import { preparationTasks, spellLimits, spellSelectionIssues } from "../lib/characterPreparation";
-import { buildCharacter, STANDARD_SCORES } from "../lib/characterBuilder";
+import { buildCharacter, STANDARD_SCORES } from "@vtt/core";
 import {
   fixedOriginFeats,
   originChoiceIssues,

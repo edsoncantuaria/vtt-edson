@@ -2,7 +2,7 @@ import { ABILITY_LABELS, type Ability, type ActorSystem } from "@vtt/core";
 import type { Dispatch, SetStateAction } from "react";
 import type { CatalogEntry } from "../../lib/catalog";
 import type { OriginChoice } from "../../lib/characterChoices";
-import { STANDARD_SCORES } from "../../lib/characterBuilder";
+import { STANDARD_SCORES } from "@vtt/core";
 import type { spellLimits } from "../../lib/characterPreparation";
 import type { StartingEquipmentPlan, resolveStartingEquipment } from "../../lib/startingEquipment";
 import { CatalogPicker } from "./CatalogPicker";

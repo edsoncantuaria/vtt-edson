@@ -237,10 +237,14 @@ class ActorTest extends TestCase
                 ['subclassId' => $evocation->id, 'name' => 'Evocation', 'source' => 'PHB', 'className' => 'Wizard', 'classSource' => 'PHB'],
             ],
         ];
+        $this->patchJson("/api/actors/{$actor['id']}", ['system' => $system, 'revision' => $actor['revision']])->assertUnprocessable();
+        $this->postJson("/api/campaigns/{$campaign->id}/actors", [
+            'type' => 'character', 'name' => 'Multiclasse importada', 'system' => $system,
+        ])->assertCreated()->assertJsonCount(2, 'actor.system.progression.subclasses');
 
-        $this->patchJson("/api/actors/{$actor['id']}", ['system' => $system, 'revision' => $actor['revision']])
+        $this->patchJson("/api/actors/{$actor['id']}", ['system' => $actor['system'], 'revision' => $actor['revision']])
             ->assertOk()
-            ->assertJsonCount(2, 'actor.system.progression.subclasses');
+            ->assertJsonPath('actor.system.bio.level', 1);
     }
 
     public function test_outsider_cannot_see_campaign_actors(): void

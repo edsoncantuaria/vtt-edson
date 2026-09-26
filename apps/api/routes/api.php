@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ActiveEffectController;
+use App\Http\Controllers\Api\ActorAdvancementController;
 use App\Http\Controllers\Api\ActorController;
 use App\Http\Controllers\Api\ActorDocumentController;
 use App\Http\Controllers\Api\ActorRestController;
@@ -153,6 +154,7 @@ Route::middleware(['auth:sanctum', SerializeSceneWrites::class])->group(function
     Route::get('/actors/{actor}', [ActorController::class, 'show']);
     Route::post('/actors/{actor}/image', [ActorController::class, 'uploadImage']);
     Route::patch('/actors/{actor}', [ActorController::class, 'update']);
+    Route::post('/actors/{actor}/advancements', [ActorAdvancementController::class, 'store']);
     Route::delete('/actors/{actor}', [ActorController::class, 'destroy']);
     Route::get('/actors/{actor}/export', [ActorController::class, 'export']);
     Route::post('/actors/{actor}/rest', [ActorRestController::class, 'store']);

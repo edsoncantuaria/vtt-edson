@@ -115,15 +115,10 @@ export function ClassicSheet({ actor, canEdit }: { actor: Actor; canEdit: boolea
               }
             />
           </label>
-          {num(
-            "Nível",
-            s.bio.level,
-            (s, n) => {
-              s.bio.level = n;
-            },
-            1,
-            20,
-          )}
+          <p>
+            Nível: {s.bio.level}. Use <b>Evoluir personagem</b> para avançar com registro das
+            escolhas.
+          </p>
           <label>
             {ruleset === "5e-2024" ? "Espécie" : "Raça"}
             <input
