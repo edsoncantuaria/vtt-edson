@@ -23,7 +23,10 @@ final class UpsertSceneTokenRequest extends FormRequest
             'x' => ['required', 'numeric'],
             'y' => ['required', 'numeric'],
             'name' => ['nullable', 'string', 'max:80'],
-            'ownerUserId' => ['nullable', 'integer'],
+            'ownerUserId' => [
+                'nullable', 'integer',
+                Rule::exists('scene_members', 'user_id')->where('scene_id', $scene->id),
+            ],
             'size' => ['nullable', 'numeric', 'min:0.25', 'max:20'],
             'appearance' => ['sometimes', 'array:border,background,zoom,x,y'],
             'appearance.border' => ['required_with:appearance', 'regex:/^#[0-9a-fA-F]{6}$/'],

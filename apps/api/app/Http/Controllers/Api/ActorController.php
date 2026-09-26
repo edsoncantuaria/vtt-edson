@@ -113,12 +113,8 @@ class ActorController extends Controller
             }
             $actor->save();
             if (isset($data['system'])) {
-                if ($actor->documents()->exists()) {
-                    $this->documents->syncLegacy($actor);
-                } else {
-                    $this->documents->syncFromLegacy($actor);
-                    $this->documents->syncLegacy($actor);
-                }
+                $this->documents->syncFromLegacy($actor);
+                $this->documents->syncLegacy($actor);
             }
 
             return response()->json(['actor' => $actor->toPayload()]);
@@ -138,6 +134,9 @@ class ActorController extends Controller
     public function destroy(Request $request, Actor $actor): JsonResponse
     {
         $this->requireEditRights($request, $actor);
+        $referencedScenes = $actor->campaign->scenes()->get(['id', 'state'])->filter(fn ($scene) => collect($scene->state['tokens'] ?? [])
+            ->contains(fn ($token) => (int) ($token['actorId'] ?? 0) === (int) $actor->id));
+        abort_if($referencedScenes->isNotEmpty(), 409, 'Remova os tokens vinculados a esta ficha das cenas antes de apagá-la.');
         $actor->delete();
 
         return response()->json(['ok' => true]);

@@ -28,12 +28,15 @@ final class SceneTokenController extends Controller
 
         if ($existingIndex === false) {
             $this->requireSceneEditor($request, $scene);
+            $linkedActor = isset($data['actorId'])
+                ? Actor::where('campaign_id', $scene->campaign_id)->findOrFail($data['actorId'])
+                : null;
             $state['tokens'][] = [
                 'id' => $id,
                 'x' => (float) $data['x'],
                 'y' => (float) $data['y'],
                 'name' => $data['name'] ?? 'Token',
-                'ownerUserId' => $data['ownerUserId'] ?? $request->user()->id,
+                'ownerUserId' => $data['ownerUserId'] ?? ($linkedActor?->type === 'character' ? $linkedActor->owner_user_id : $request->user()->id),
                 'size' => (float) ($data['size'] ?? 1),
                 ...(isset($data['appearance']) ? ['appearance' => $data['appearance']] : []),
                 'actorId' => $data['actorId'] ?? null,

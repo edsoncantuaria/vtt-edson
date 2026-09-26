@@ -44,10 +44,14 @@ class FollowupPreparationTest extends TestCase
 
     public function test_campaign_export_and_token_appearance_are_gm_only(): void
     {
-        Sanctum::actingAs(User::factory()->create());
+        $gm = User::factory()->create();
+        Sanctum::actingAs($gm);
         $room = $this->postJson('/api/rooms', ['name' => 'Backup'])->json();
         $path = '/api/scenes/'.$room['scene']['id'].'/tokens';
         $player = User::factory()->create();
+        Sanctum::actingAs($player);
+        $this->postJson('/api/rooms/join', ['code' => $room['room']['code']])->assertOk();
+        Sanctum::actingAs($gm);
         $token = $this->postJson($path, ['name' => 'Token', 'x' => 40, 'y' => 40, 'ownerUserId' => $player->id])->json('state.tokens.0');
         $appearance = ['border' => '#ffaa00', 'background' => '#112233', 'zoom' => 2, 'x' => .2, 'y' => -.1];
         $this->postJson($path, [...$token, 'size' => 2, 'appearance' => $appearance])->assertOk()->assertJsonPath('state.tokens.0.size', 2)->assertJsonPath('state.tokens.0.appearance.zoom', 2);
