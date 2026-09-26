@@ -53,6 +53,158 @@ class DamageController extends Controller
         return ['scene_id' => $scene->id, 'actor_id' => $actor->id, 'message_id' => $messageId];
     }
 
+    /** The action record, not a later map selection, owns every batch target. */
+    private function batchSource(Request $request, Scene $scene, string $messageId, bool $requireActive = true): array
+    {
+        $this->requireGm($request, $scene);
+        [$message, $record] = $this->source($request, $scene, $messageId);
+        abort_unless($record && isset($message['save']), 422, 'Esta ação não tem salvaguardas registradas.');
+        abort_if($requireActive && $record->undone, 409, 'Esta ação já foi desfeita.');
+        $ids = array_values(array_unique(array_map('intval', $message['targetActorIds'] ?? [])));
+        abort_unless(count($ids) >= 1 && count($ids) <= 50, 422, 'A ação precisa de alvos confirmados para resolver em lote.');
+
+        return [$message, $record, $ids];
+    }
+
+    /** Entire, GM-only per-target status survives chat truncation and reload. */
+    public function batchIndex(Request $request, Scene $scene, string $messageId)
+    {
+        [$message, $record, $ids] = $this->batchSource($request, $scene, $messageId, false);
+        $actors = Actor::where('campaign_id', $scene->campaign_id)->whereIn('id', $ids)->get()->keyBy('id');
+        abort_unless($actors->count() === count($ids), 409, 'Um dos alvos da ação não existe mais.');
+        $saves = json_decode($record->saves ?? '{}', true);
+        $applications = DB::table('damage_applications')->where('scene_id', $scene->id)
+            ->where('message_id', $messageId)->whereIn('actor_id', $ids)->get()->keyBy('actor_id');
+        $hasDamage = collect($message['rolls'] ?? [])->contains('kind', 'damage');
+        $rows = [];
+        foreach ($ids as $id) {
+            $actor = $actors->get($id);
+            $save = $saves[$id] ?? null;
+            $operation = $applications->get($id);
+            $effective = $this->effects->effectiveSystem($actor);
+            $preview = $hasDamage
+                ? CombatRules::damage($message, $effective, $save)
+                : ['damage' => 0, 'hit' => null, 'pendingSave' => $save === null, 'steps' => ['Ação sem dano direto']];
+            $rows[] = [
+                'actorId' => $id, 'name' => $actor->name, 'type' => $actor->type,
+                'ownerUserId' => $actor->owner_user_id, 'save' => $save, 'preview' => $preview,
+                'application' => $operation ? ['undone' => (bool) $operation->undone,
+                    'resolution' => json_decode($operation->resolution ?? '{}', true)] : null,
+            ];
+        }
+
+        $operations = DB::table('action_batch_operations')->where(['scene_id' => $scene->id, 'message_id' => $messageId])
+            ->orderBy('id')->get(['user_id', 'request_id', 'kind', 'target_actor_ids', 'created_at']);
+        $authorIds = $operations->pluck('user_id')->all();
+        foreach ($rows as $row) {
+            if (isset($row['save']['userId'])) {
+                $authorIds[] = $row['save']['userId'];
+            }
+            foreach ($row['save']['history'] ?? [] as $old) {
+                if (isset($old['userId'])) {
+                    $authorIds[] = $old['userId'];
+                }
+            }
+        }
+        $authors = DB::table('users')->whereIn('id', array_unique($authorIds))->pluck('name', 'id');
+        foreach ($rows as &$row) {
+            if ($row['save'] !== null) {
+                $row['save']['userName'] = $authors[$row['save']['userId'] ?? null] ?? 'Usuário';
+                foreach ($row['save']['history'] ?? [] as $index => $old) {
+                    $row['save']['history'][$index]['userName'] = $authors[$old['userId'] ?? null] ?? 'Usuário';
+                }
+            }
+        }
+        unset($row);
+
+        return response()->json([
+            'save' => $message['save'], 'rows' => $rows, 'actionUndone' => (bool) $record->undone,
+            'operations' => $operations->map(fn ($entry) => [
+                'requestId' => $entry->request_id, 'kind' => $entry->kind,
+                'actorIds' => json_decode($entry->target_actor_ids, true),
+                'userId' => $entry->user_id, 'userName' => $authors[$entry->user_id] ?? 'Usuário',
+                'createdAt' => $entry->created_at,
+            ])->all(),
+        ]);
+    }
+
+    /** Refuse reused keys with changed payloads; the scene's write lock serializes concurrent batches. */
+    private function batchReplay(Request $request, Scene $scene, string $messageId, string $kind, string $requestId, array $targets): bool
+    {
+        $hash = hash('sha256', json_encode([$messageId, $kind, $targets], JSON_THROW_ON_ERROR));
+        $existing = DB::table('action_batch_operations')->where([
+            'scene_id' => $scene->id, 'user_id' => $request->user()->id, 'request_id' => $requestId,
+        ])->first();
+        if ($existing) {
+            abort_unless(hash_equals($existing->input_hash, $hash), 409, 'Esta chave já corresponde a outra operação em lote.');
+
+            return true;
+        }
+        DB::table('action_batch_operations')->insert([
+            'scene_id' => $scene->id, 'user_id' => $request->user()->id,
+            'request_id' => $requestId, 'message_id' => $messageId, 'kind' => $kind,
+            'input_hash' => $hash, 'target_actor_ids' => json_encode(array_column($targets, 'actorId'), JSON_THROW_ON_ERROR),
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        return false;
+    }
+
+    public function batchSave(Request $request, Scene $scene, string $messageId, DiceRoller $dice, RollLedger $ledger)
+    {
+        return DB::transaction(function () use ($request, $scene, $messageId, $dice, $ledger) {
+            [, , $ids] = $this->batchSource($request, $scene, $messageId);
+            $data = $request->validate([
+                'requestId' => ['required', 'uuid'], 'targets' => ['required', 'array', 'min:1', 'max:50'],
+                'targets.*' => ['required', 'array:actorId,mode,bonus,decision,reason'],
+                'targets.*.actorId' => ['required', 'integer', 'distinct'],
+                'targets.*.mode' => ['sometimes', 'in:normal,advantage,disadvantage'],
+                'targets.*.bonus' => ['sometimes', 'integer', 'between:-30,30'],
+                'targets.*.decision' => ['sometimes', 'in:roll,success,failure'],
+                'targets.*.reason' => ['required_if:targets.*.decision,success,failure', 'string', 'max:240'],
+            ]);
+            $targets = $data['targets'];
+            usort($targets, fn ($a, $b) => $a['actorId'] <=> $b['actorId']);
+            abort_unless(! array_diff(array_column($targets, 'actorId'), $ids), 422, 'A operação inclui um alvo fora da ação.');
+            foreach ($targets as $target) {
+                abort_if(($target['decision'] ?? 'roll') !== 'roll' && trim($target['reason'] ?? '') === '', 422, 'Decisões manuais exigem motivo.');
+            }
+            $replayed = $this->batchReplay($request, $scene, $messageId, 'save', $data['requestId'], $targets);
+            if (! $replayed) {
+                foreach ($targets as $target) {
+                    $request->replace($target);
+                    $this->saveLocked($request, $scene, $messageId, $dice, $ledger);
+                }
+            }
+
+            return response()->json(['replayed' => $replayed, 'actorIds' => array_column($targets, 'actorId')]);
+        });
+    }
+
+    public function batchApply(Request $request, Scene $scene, string $messageId)
+    {
+        return DB::transaction(function () use ($request, $scene, $messageId) {
+            [, , $ids] = $this->batchSource($request, $scene, $messageId);
+            $data = $request->validate([
+                'requestId' => ['required', 'uuid'], 'actorIds' => ['required', 'array', 'min:1', 'max:50'],
+                'actorIds.*' => ['required', 'integer', 'distinct'],
+            ]);
+            $targetIds = $data['actorIds'];
+            sort($targetIds);
+            abort_unless(! array_diff($targetIds, $ids), 422, 'A operação inclui um alvo fora da ação.');
+            $targets = array_map(fn ($id) => ['actorId' => $id], $targetIds);
+            $replayed = $this->batchReplay($request, $scene, $messageId, 'apply', $data['requestId'], $targets);
+            if (! $replayed) {
+                foreach ($targetIds as $id) {
+                    $request->replace(['actorId' => $id]);
+                    $this->storeLocked($request, $scene, $messageId);
+                }
+            }
+
+            return response()->json(['replayed' => $replayed, 'actorIds' => $targetIds]);
+        });
+    }
+
     public function history(Request $request, Scene $scene)
     {
         $this->requireMember($request, $scene);

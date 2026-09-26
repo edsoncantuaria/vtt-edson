@@ -149,6 +149,9 @@ Route::middleware(['auth:sanctum', SerializeSceneWrites::class])->group(function
     Route::post('/scenes/{scene}/private-messages', [PrivateMessageController::class, 'store']);
     Route::get('/scenes/{scene}/damage/{messageId}', [DamageController::class, 'show']);
     Route::post('/scenes/{scene}/damage/{messageId}/save', [DamageController::class, 'save']);
+    Route::get('/scenes/{scene}/actions/{messageId}/save-batch', [DamageController::class, 'batchIndex']);
+    Route::post('/scenes/{scene}/actions/{messageId}/save-batch', [DamageController::class, 'batchSave']);
+    Route::post('/scenes/{scene}/actions/{messageId}/resolve-batch', [DamageController::class, 'batchApply']);
     Route::post('/scenes/{scene}/damage/{messageId}/concentration', [DamageController::class, 'concentration']);
     Route::post('/scenes/{scene}/actions/{messageId}/undo', [DamageController::class, 'undoAction']);
     Route::get('/scenes/{scene}/actions/{messageId}/heal', [ActionHealingController::class, 'show']);

@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { isValidDiceFormula, type ChatMessage } from "@vtt/core";
+import { isManagerRole, isValidDiceFormula, type ChatMessage } from "@vtt/core";
 import { api } from "../lib/api";
 import { useSession } from "../store/session";
 import { updateScene } from "../lib/scene";
 import { DamageApplication } from "./DamageApplication";
+import { SaveBatchResolution } from "./SaveBatchResolution";
 import { HealingApplication } from "./HealingApplication";
 import { UndoAction } from "./UndoAction";
 import { Icon } from "./Icon";
 import { PrivateChat } from "./PrivateChat";
 
 export function ChatPanel() {
-  const { state, sceneId, setError, user } = useSession();
+  const { state, sceneId, setError, user, role } = useSession();
   const [history, setHistory] = useState<ChatMessage[] | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
   const [lastPage, setLastPage] = useState(1);
@@ -186,6 +187,9 @@ export function ChatPanel() {
               (m.effect &&
                 ["on-hit", "on-failed-save"].includes(m.effect.trigger ?? "on-use"))) && (
               <DamageApplication message={m} />
+            )}
+            {isManagerRole(role) && m.save && (m.targetActorIds?.length ?? 0) > 1 && (
+              <SaveBatchResolution message={m} />
             )}
             {m.rolls?.some((roll) => roll.kind === "heal") && <HealingApplication message={m} />}
             {m.type === "action" && m.sourceActorId && (
