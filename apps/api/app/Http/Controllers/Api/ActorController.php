@@ -113,12 +113,8 @@ class ActorController extends Controller
             }
             $actor->save();
             if (isset($data['system'])) {
-                if ($actor->documents()->exists()) {
-                    $this->documents->syncLegacy($actor);
-                } else {
-                    $this->documents->syncFromLegacy($actor);
-                    $this->documents->syncLegacy($actor);
-                }
+                $this->documents->syncFromLegacy($actor);
+                $this->documents->syncLegacy($actor);
             }
 
             return response()->json(['actor' => $actor->toPayload()]);
@@ -137,10 +133,19 @@ class ActorController extends Controller
 
     public function destroy(Request $request, Actor $actor): JsonResponse
     {
-        $this->requireEditRights($request, $actor);
-        $actor->delete();
+        return DB::transaction(function () use ($request, $actor) {
+            // Token writes serialize on their scene. Acquire those same locks before
+            // checking references, so a concurrent placement cannot race deletion.
+            $scenes = $actor->campaign->scenes()->orderBy('id')->lockForUpdate()->get(['id', 'state']);
+            $actor = Actor::query()->lockForUpdate()->findOrFail($actor->id);
+            $this->requireEditRights($request, $actor);
+            $referenced = $scenes->contains(fn ($scene) => collect($scene->state['tokens'] ?? [])
+                ->contains(fn ($token) => (int) ($token['actorId'] ?? 0) === (int) $actor->id));
+            abort_if($referenced, 409, 'Remova os tokens vinculados a esta ficha das cenas antes de apagá-la.');
+            $actor->delete();
 
-        return response()->json(['ok' => true]);
+            return response()->json(['ok' => true]);
+        });
     }
 
     /** Ficha "portátil" pra export/import entre campanhas — sem ids de banco. */

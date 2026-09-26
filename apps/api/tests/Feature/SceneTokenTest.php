@@ -139,6 +139,40 @@ class SceneTokenTest extends TestCase
         $this->assertSame($actor->id, $res->json('state.tokens.0.actorId'));
     }
 
+    public function test_character_token_inherits_its_owner_and_does_not_duplicate_actor_vitals(): void
+    {
+        [$gm, $player, , $campaign, $scene] = $this->sceneWithGmAndTwoPlayers();
+        $actor = Actor::create([
+            'campaign_id' => $campaign->id,
+            'owner_user_id' => $player->id,
+            'type' => 'character',
+            'name' => 'Hero',
+            'system' => ActorStateFactory::character(),
+        ]);
+        Sanctum::actingAs($gm);
+        $first = $this->postJson('/api/scenes/'.$scene->id.'/tokens', ['x' => 1, 'y' => 2, 'actorId' => $actor->id])->assertOk()->json('state.tokens.0');
+        $second = $this->postJson('/api/scenes/'.$scene->id.'/tokens', ['x' => 3, 'y' => 4, 'actorId' => $actor->id])->assertOk()->json('state.tokens.1');
+        $this->assertNotSame($first['id'], $second['id']);
+        $this->assertSame($actor->id, $first['actorId']);
+        $this->assertSame($actor->id, $second['actorId']);
+        $this->assertSame($player->id, $first['ownerUserId']);
+        $this->assertArrayNotHasKey('hp', $first);
+        Sanctum::actingAs($player);
+        $this->postJson('/api/scenes/'.$scene->id.'/tokens', ['id' => $first['id'], 'x' => 10, 'y' => 20])->assertOk();
+        $this->assertSame(['x' => 3, 'y' => 4], array_intersect_key($scene->fresh()->state['tokens'][1], ['x' => true, 'y' => true]));
+    }
+
+    public function test_gm_cannot_assign_a_token_to_a_user_outside_the_scene(): void
+    {
+        [$gm, , , , $scene] = $this->sceneWithGmAndTwoPlayers();
+        $outsider = User::factory()->create();
+        Sanctum::actingAs($gm);
+        $this->postJson('/api/scenes/'.$scene->id.'/tokens', [
+            'x' => 1, 'y' => 2, 'ownerUserId' => $outsider->id,
+        ])->assertUnprocessable();
+        $this->assertCount(0, $scene->fresh()->state['tokens']);
+    }
+
     public function test_actor_id_must_exist(): void
     {
         [$gm, , , , $scene] = $this->sceneWithGmAndTwoPlayers();
@@ -156,6 +190,19 @@ class SceneTokenTest extends TestCase
         $actor = Actor::create(['campaign_id' => $other->id, 'type' => 'monster', 'name' => 'Secret', 'system' => ActorStateFactory::monster()]);
         Sanctum::actingAs($gm);
         $this->postJson('/api/scenes/'.$scene->id.'/tokens', ['x' => 1, 'y' => 1, 'actorId' => $actor->id])->assertUnprocessable();
+    }
+
+    public function test_actor_with_a_token_cannot_be_deleted_and_then_can_be_deleted_after_token_removal(): void
+    {
+        [$gm, , , $campaign, $scene] = $this->sceneWithGmAndTwoPlayers();
+        $actor = Actor::create(['campaign_id' => $campaign->id, 'type' => 'monster', 'name' => 'Goblin', 'system' => ActorStateFactory::monster()]);
+        Sanctum::actingAs($gm);
+        $token = $this->postJson('/api/scenes/'.$scene->id.'/tokens', ['x' => 1, 'y' => 1, 'actorId' => $actor->id])->assertOk()->json('state.tokens.0');
+        $this->deleteJson('/api/actors/'.$actor->id)->assertStatus(409);
+        $this->assertDatabaseHas('actors', ['id' => $actor->id]);
+        $this->deleteJson('/api/scenes/'.$scene->id.'/tokens/'.$token['id'])->assertOk();
+        $this->deleteJson('/api/actors/'.$actor->id)->assertOk();
+        $this->assertDatabaseMissing('actors', ['id' => $actor->id]);
     }
 
     public function test_portrait_upload_requires_ownership_and_returns_local_asset(): void

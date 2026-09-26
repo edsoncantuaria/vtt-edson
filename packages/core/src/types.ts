@@ -117,6 +117,8 @@ export const ChatMessageSchema = z.object({
 })
 
 export const SceneStateSchema = z.object({
+  // Missing version denotes an existing V1 scene; only new scenes are created as V2.
+  schemaVersion: z.union([z.literal(1), z.literal(2)]).default(1),
   preparation: z.object({entryId:z.number(),chapter:z.string(),source:z.string(),sourceHash:z.string(),reviewed:z.boolean()}).optional(),
   grid: GridSchema,
   backgroundUrl: z.string().nullable().optional(),
@@ -161,6 +163,7 @@ export type SceneState = z.infer<typeof SceneStateSchema>
 
 export function emptySceneState(): SceneState {
   return {
+    schemaVersion: 2,
     grid: { size: 70, offsetX: 0, offsetY: 0, snap: true },
     backgroundUrl: null,
     tokens: [],

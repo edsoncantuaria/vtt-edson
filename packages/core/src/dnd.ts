@@ -75,7 +75,7 @@ export const InventoryItemSchema = z.object({
   documentId: z.number().int().positive().optional(),
   slug: z.string().nullable().optional(),
   name: z.string(),
-  quantity: z.number().default(1),
+  quantity: z.number().int().min(1).max(1000000).default(1),
   weight: z.number().optional(),
   equipped: z.boolean().default(false),
   description: z.string().optional(),
@@ -136,7 +136,7 @@ export const ActorResourceSchema = z.object({
   max: z.number().int().min(0).max(100000),
   used: z.number().int().min(0).max(100000),
   reset: z.enum(['short','long','manual']).default('manual'),
-})
+}).refine((resource) => resource.used <= resource.max, { path: ['used'], message: 'O recurso gasto não pode exceder o máximo.' })
 
 export const FeatureSchema = z.object({
   id: z.string(),
@@ -223,7 +223,8 @@ export const ActorSystemSchema = z.object({
   proficiencies: z.string().default(''),
   spellcastingAbility: z.enum(['str','dex','con','int','wis','cha']).default('int'),
   proficiencyBonus: z.number().default(2),
-  hp: z.object({ value: z.number(), max: z.number(), temp: z.number().default(0) }),
+  hp: z.object({ value: z.number().int().min(0), max: z.number().int().min(1), temp: z.number().int().min(0).default(0) })
+    .refine((hp) => hp.value <= hp.max, { path: ['value'], message: 'PV atuais não podem exceder o máximo.' }),
   ac: z.number(),
   speed: z.number(),
   skills: z.record(z.string(), SkillSchema),
@@ -234,7 +235,8 @@ export const ActorSystemSchema = z.object({
   spells: z.object({
     slots: z.preprocess(
       (value) => Array.isArray(value) && value.length === 0 ? {} : value,
-      z.record(z.string(), z.object({ max: z.number(), used: z.number() })).default({}),
+      z.record(z.string(), z.object({ max: z.number().int().min(0).max(100), used: z.number().int().min(0).max(100) })
+        .refine((slot) => slot.used <= slot.max, { path: ['used'], message: 'Espaços gastos não podem exceder o máximo.' })).default({}),
     ),
     known: z.array(KnownSpellSchema).default([]),
   }),

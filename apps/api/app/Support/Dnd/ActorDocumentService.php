@@ -24,7 +24,13 @@ final class ActorDocumentService
                 if (! is_array($row) || empty($row['name'])) {
                     continue;
                 }
-                $document = $documents->first(function (ActorDocument $candidate) use ($row) {
+                $document = $documents->first(function (ActorDocument $candidate) use ($row, $matched) {
+                    if (in_array($candidate->id, $matched, true)) {
+                        return false;
+                    }
+                    if (isset($row['documentId'])) {
+                        return (int) $row['documentId'] === $candidate->id;
+                    }
                     $candidateId = (string) data_get($candidate->data, 'id', '');
                     $rowId = (string) ($row['id'] ?? '');
                     if ($candidateId !== '' && $rowId !== '' && $candidateId === $rowId) {
@@ -36,10 +42,13 @@ final class ActorDocumentService
                 if (! $document) {
                     $document = new ActorDocument(['actor_id' => $actor->id, 'kind' => $kind]);
                 }
+                // Legacy sheet fields are edits to a projection, not permission to
+                // discard canonical automation/provenance kept in the document.
+                unset($row['automation']);
                 $document->name = mb_substr((string) $row['name'], 0, 160);
                 $document->slug = $row['slug'] ?? $document->slug;
                 $document->source = $row['source'] ?? $document->source;
-                $document->data = $row;
+                $document->data = array_replace($document->data ?? [], $row);
                 $document->quantity = max(1, (int) ($row['quantity'] ?? $document->quantity ?? 1));
                 $document->equipped = (bool) ($row['equipped'] ?? $document->equipped ?? false);
                 $document->prepared = (bool) ($row['prepared'] ?? $document->prepared ?? false);
