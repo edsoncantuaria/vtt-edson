@@ -304,15 +304,20 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
           <section>
             <strong>Dano calculado: {result.preview.damage}</strong>
             {result.preview.attack && (
-              <small>
-                {result.preview.attack.hit ? "Acerto" : "Falha"}: {result.preview.attack.total}{" "}
-                contra CA {result.preview.attack.ac}
-                {result.preview.attack.critical
-                  ? " · crítico"
-                  : result.preview.attack.fumble
-                    ? " · 1 natural"
-                    : ""}
-              </small>
+              <div className="resolution-result" role="status">
+                <strong>
+                  {result.preview.attack.hit ? "Acerto" : "Falha"}: {result.preview.attack.total}{" "}
+                  contra CA {result.preview.attack.ac}
+                </strong>
+                <small>
+                  Resultado do ataque para o alvo autorizado · calculado pelo servidor
+                  {result.preview.attack.critical
+                    ? " · crítico"
+                    : result.preview.attack.fumble
+                      ? " · 1 natural"
+                      : ""}
+                </small>
+              </div>
             )}
             {result.preview.steps.map((step, index) => (
               <small key={index}>{step}</small>

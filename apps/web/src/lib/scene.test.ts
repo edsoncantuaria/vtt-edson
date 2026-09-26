@@ -80,6 +80,37 @@ describe("scene writes and account isolation", () => {
     await expect(updateScene(1, "/chat", { text: "Olá" })).resolves.toBeDefined();
     expect(apiWriteState().busy).toBe(false);
   });
+  it("shows a reserved roll only to its sender after server confirmation, never on retry", async () => {
+    const state = emptySceneState();
+    const roll = {
+      id: "43fa9151-0e32-43e5-90ef-cbc4c5fe0c10",
+      visibility: "gm",
+      label: "Percepção",
+      formula: "d20+3",
+      total: 14,
+      detail: "11 + 3 = 14",
+      critical: false,
+      fumble: false,
+      createdAt: "2026-09-26T13:00:00Z",
+      replayed: false,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(response({ state, roll }))
+        .mockResolvedValueOnce(response({ state, roll: { ...roll, replayed: true } })),
+    );
+    const onFeedback = vi.fn();
+    window.addEventListener("vtt:local-roll-feedback", onFeedback);
+    await updateScene(1, "/rolls", { requestId: roll.id });
+    expect(onFeedback).toHaveBeenCalledTimes(1);
+    expect((onFeedback.mock.calls[0][0] as CustomEvent).detail.message.id).toBe(roll.id);
+    expect(useSession.getState().state.chat).toEqual([]);
+    await updateScene(1, "/rolls", { requestId: roll.id });
+    expect(onFeedback).toHaveBeenCalledTimes(1);
+    window.removeEventListener("vtt:local-roll-feedback", onFeedback);
+  });
   it("does not send queued edits using a different account token", async () => {
     const first = deferred<Response>();
     const fetch = vi.fn().mockReturnValue(first.promise);

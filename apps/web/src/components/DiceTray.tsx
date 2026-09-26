@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { isValidDiceFormula, RollRecordSchema } from "@vtt/core";
 import { rollHistoryPage, rollToChat } from "../lib/roll";
 import type { RollRecord } from "@vtt/core";
+import { readRollFeedbackPreferences, saveRollFeedbackPreferences } from "../lib/rollFeedback";
 import { useSession } from "../store/session";
 import { Icon } from "./Icon";
 export function DiceTray() {
@@ -17,7 +18,13 @@ export function DiceTray() {
   const [historyPage, setHistoryPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [lastRoll, setLastRoll] = useState<RollRecord | null>(null);
+  const [feedbackPreferences, setFeedbackPreferences] = useState(readRollFeedbackPreferences);
   const pendingRoll = useRef<{ key: string; id: string } | null>(null);
+  function changeFeedback(setting: "animate" | "sound", enabled: boolean) {
+    const next = { ...feedbackPreferences, [setting]: enabled };
+    saveRollFeedbackPreferences(next);
+    setFeedbackPreferences(next);
+  }
   useEffect(() => {
     setHistory(null);
     setHistoryPage(1);
@@ -131,6 +138,29 @@ export function DiceTray() {
           {busy ? "Rolando…" : formula}
         </button>
       </div>
+      <fieldset className="dice-feedback-settings">
+        <legend>Feedback dos dados</legend>
+        <label>
+          <input
+            type="checkbox"
+            checked={feedbackPreferences.animate}
+            onChange={(event) => changeFeedback("animate", event.target.checked)}
+          />
+          Animação breve sobre o mapa
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={feedbackPreferences.sound}
+            onChange={(event) => changeFeedback("sound", event.target.checked)}
+          />
+          Som discreto (opcional)
+        </label>
+        <small>
+          Respeita a preferência de movimento reduzido do dispositivo. O resultado aparece
+          imediatamente no chat.
+        </small>
+      </fieldset>
       {lastRoll && (
         <p role="status" className="panel-hint">
           {lastRoll.visibility === "gm" ? "Reservada" : "Pública"} · {lastRoll.formula} ={" "}

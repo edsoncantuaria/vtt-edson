@@ -4,6 +4,7 @@ import { updateScene } from "../lib/scene";
 import { useSceneSync } from "../lib/useSceneSync";
 import { Icon } from "./Icon";
 import { DiceTray } from "./DiceTray";
+import { RollFeedback } from "./RollFeedback";
 import { AmbiencePlayer } from "./AmbiencePlayer";
 import { api } from "../lib/api";
 import { pluginRegistry } from "../lib/plugins";
@@ -193,6 +194,7 @@ export function TableView() {
           onHelp={() => setHelpOpen(true)}
         />
         <section className="table-stage" aria-label="Mapa da sessão">
+          {sceneId && <RollFeedback key={sceneId} sceneId={sceneId} chat={state.chat} />}
           <div
             className="table-canvas"
             ref={host}

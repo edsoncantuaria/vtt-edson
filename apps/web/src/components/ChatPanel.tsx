@@ -133,7 +133,7 @@ export function ChatPanel() {
             {m.type === "roll" || m.type === "action" ? (
               <div className="roll-result">
                 <div>
-                  <span>{m.label || "Rolagem de dados"}</span>
+                  <span>{m.label || (m.type === "action" ? "Ação" : "Rolagem de dados")}</span>
                   <code>{m.formula}</code>
                   <small>{m.detail}</small>
                   {m.rollId && (
@@ -152,11 +152,11 @@ export function ChatPanel() {
                       <small>{roll.detail}</small>
                     </div>
                   ))}
-                {m.critical && <b className="roll-tag">20 natural</b>}
+                {m.critical && <b className="roll-tag">20 natural · crítico</b>}
                 {m.houseRules?.length ? (
                   <small className="roll-tag">Regras da mesa: {m.houseRules.join(", ")}</small>
                 ) : null}
-                {m.fumble && <b className="roll-tag">1 natural</b>}
+                {m.fumble && <b className="roll-tag">1 natural · falha crítica</b>}
                 {m.type === "action" && (
                   <b className="roll-tag">
                     {m.actionKind === "spell" ? "Conjuração compartilhada" : "Ação compartilhada"}
@@ -204,7 +204,7 @@ export function ChatPanel() {
             aria-label="Enviar mensagem"
             disabled={busy || !text.trim()}
           >
-            <Icon name="arrow" size={18} />
+            {busy ? "Enviando…" : <Icon name="arrow" size={18} />}
           </button>
         </div>
         <small>
