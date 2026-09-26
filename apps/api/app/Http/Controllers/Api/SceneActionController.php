@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Events\SceneUpdated;
-use App\Game\Dice\DiceRoller;
+use App\Game\Dice\RollLedger;
 use App\Http\Controllers\Concerns\AuthorizesScene;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ExecuteSceneActionRequest;
@@ -23,7 +23,7 @@ final class SceneActionController extends Controller
 {
     use AuthorizesScene;
 
-    public function action(ExecuteSceneActionRequest $request, Scene $scene, DiceRoller $dice, ActiveEffectEngine $effects): JsonResponse
+    public function action(ExecuteSceneActionRequest $request, Scene $scene, RollLedger $ledger, ActiveEffectEngine $effects): JsonResponse
     {
         $member = $this->requireParticipant($request, $scene);
         $data = $request->validated();
@@ -88,6 +88,8 @@ final class SceneActionController extends Controller
                 if ($formula === '') {
                     continue;
                 }
+                // Transform the d20 before optional effect dice (e.g. Bless +d4).
+                // RollLedger records the mode but must not apply it a second time.
                 if ($kind === 'attack' && ($data['mode'] ?? 'normal') !== 'normal') {
                     abort_unless(preg_match('/^(?:1)?d20([+-]\d+)?$/i', $formula, $match), 422, 'Para escolher vantagem, use uma fórmula de ataque 1d20±K.');
                     $formula = ($data['mode'] === 'advantage' ? '2d20kh1' : '2d20kl1').($match[1] ?? '');
@@ -98,7 +100,13 @@ final class SceneActionController extends Controller
                 if ($kind === 'damage' && ($rolls[0]['kind'] ?? null) === 'attack' && $rolls[0]['critical']) {
                     $formula = CombatRules::criticalFormula($formula);
                 }
-                $rolls[] = ['kind' => $kind, ...$dice->roll($formula)];
+                $rolls[] = ['kind' => $kind, ...$ledger->roll($scene, $request->user(), [
+                    'requestId' => $requestId, 'step' => $kind, 'context' => $kind,
+                    'actorId' => $actor->id, 'formula' => $formula, 'mode' => $kind === 'attack' ? ($data['mode'] ?? 'normal') : 'normal',
+                    'modePrepared' => $kind === 'attack' && ($data['mode'] ?? 'normal') !== 'normal',
+                    'label' => $actor->name.' · '.$action['name'].' · '.$kind,
+                    'houseRules' => $adjusted['rules'],
+                ])];
                 $appliedRules = array_merge($appliedRules, $adjusted['rules']);
             }
         } catch (InvalidArgumentException $e) {

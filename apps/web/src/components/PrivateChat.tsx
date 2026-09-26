@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { api } from "../lib/api";
 import { useSession } from "../store/session";
 
@@ -6,6 +6,7 @@ type Recipient = { id: number; name: string };
 type PrivateMessage = {
   id: number;
   kind: "text" | "roll";
+  roll_id?: string | null;
   text: string | null;
   formula: string | null;
   total: number | null;
@@ -23,6 +24,7 @@ export function PrivateChat() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const pendingRoll = useRef<{ key: string; id: string } | null>(null);
   const load = useCallback(async () => {
     if (!sceneId) return;
     try {
@@ -44,17 +46,31 @@ export function PrivateChat() {
   async function send(event: FormEvent) {
     event.preventDefault();
     if (!sceneId || !text.trim() || busy) return;
+    const isRoll = text.trim().toLowerCase().startsWith("/roll ");
+    const key = `${sceneId}:${recipient}:${text.trim()}`;
+    if (isRoll && pendingRoll.current?.key !== key)
+      pendingRoll.current = { key, id: crypto.randomUUID() };
     setBusy(true);
     try {
       await api(`/scenes/${sceneId}/private-messages`, {
         method: "POST",
         body: JSON.stringify(
           recipient === "gm"
-            ? { audience: "gm", text: text.trim() }
-            : { audience: "user", recipientUserId: Number(recipient), text: text.trim() },
+            ? {
+                audience: "gm",
+                text: text.trim(),
+                ...(isRoll ? { requestId: pendingRoll.current?.id } : {}),
+              }
+            : {
+                audience: "user",
+                recipientUserId: Number(recipient),
+                text: text.trim(),
+                ...(isRoll ? { requestId: pendingRoll.current?.id } : {}),
+              },
         ),
       });
       setText("");
+      pendingRoll.current = null;
       await load();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Falha ao enviar mensagem privada.");
@@ -80,6 +96,9 @@ export function PrivateChat() {
               <p>
                 <code>{message.formula}</code> = <b>{message.total}</b>
                 <small>{message.detail}</small>
+                {message.roll_id && (
+                  <small title={message.roll_id}>ID: {message.roll_id.slice(0, 8)}</small>
+                )}
               </p>
             ) : (
               <p>{message.text}</p>

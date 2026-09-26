@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { isManagerRole, useSession } from "../store/session";
 
@@ -28,9 +28,10 @@ export function RollTableManager({
     data: Record<string, unknown>;
   }) => void;
 }) {
-  const { campaignId, role } = useSession();
+  const { campaignId, sceneId, role } = useSession();
   const [tables, setTables] = useState<Table[]>([]);
   const [message, setMessage] = useState("");
+  const pending = useRef<{ sceneId: number; tableId: number; id: string } | null>(null);
   const refresh = useCallback(async () => {
     if (campaignId)
       setTables((await api<{ tables: Table[] }>(`/campaigns/${campaignId}/roll-tables`)).tables);
@@ -56,8 +57,16 @@ export function RollTableManager({
   }
 
   async function roll(table: Table) {
+    if (!sceneId) return;
+    if (pending.current?.sceneId !== sceneId || pending.current?.tableId !== table.id) {
+      pending.current = { sceneId, tableId: table.id, id: crypto.randomUUID() };
+    }
     try {
-      const result = await api<RollResult>(`/roll-tables/${table.id}/roll`, { method: "POST" });
+      const result = await api<RollResult>(`/roll-tables/${table.id}/roll`, {
+        method: "POST",
+        body: JSON.stringify({ sceneId, requestId: pending.current.id }),
+      });
+      pending.current = null;
       const materialized = result.encounterDraft
         ? ` · encontro “${result.encounterDraft.name}” criado`
         : result.loot

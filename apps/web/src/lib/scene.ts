@@ -1,4 +1,4 @@
-import type { Actor, SceneState } from "@vtt/core";
+import type { Actor, RollRecord, SceneState } from "@vtt/core";
 import { api, getToken } from "./api";
 import { useSession } from "../store/session";
 
@@ -26,6 +26,7 @@ export function updateScene(
       const result = await api<{
         state: SceneState;
         actor?: Actor;
+        roll?: RollRecord;
         backgroundUrl?: string | null;
       }>("/scenes/" + sceneId + suffix, {
         method,

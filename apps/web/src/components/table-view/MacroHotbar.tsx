@@ -1,5 +1,5 @@
 import type { Actor } from "@vtt/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { pluginRegistry } from "../../lib/plugins";
 import { useSession } from "../../store/session";
@@ -10,6 +10,7 @@ export function MacroHotbar({ center }: { center: () => { x: number; y: number }
     useSession();
   const [macros, setMacros] = useState<CampaignMacro[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
+  const pending = useRef<{ sceneId: number; macroId: number; id: string } | null>(null);
 
   useEffect(() => {
     if (!campaignId) return;
@@ -35,6 +36,9 @@ export function MacroHotbar({ center }: { center: () => { x: number; y: number }
 
   async function execute(macro: CampaignMacro) {
     if (!sceneId || !campaignId || busy !== null) return;
+    if (pending.current?.sceneId !== sceneId || pending.current?.macroId !== macro.id) {
+      pending.current = { sceneId, macroId: macro.id, id: crypto.randomUUID() };
+    }
     setBusy(macro.id);
     try {
       const result = await api<{ state: ReturnType<typeof useSession.getState>["state"] }>(
@@ -43,6 +47,7 @@ export function MacroHotbar({ center }: { center: () => { x: number; y: number }
           method: "POST",
           body: JSON.stringify({
             sceneId,
+            requestId: pending.current.id,
             actorId: selectedActorId,
             targetActorIds,
             point: center(),
@@ -50,6 +55,7 @@ export function MacroHotbar({ center }: { center: () => { x: number; y: number }
         },
       );
       patchState(result.state);
+      pending.current = null;
       const actors = await api<{ actors: Actor[] }>(`/campaigns/${campaignId}/actors`);
       setActors(actors.actors);
       await pluginRegistry.hooks.emit("macro:executed", { sceneId, macroId: macro.id });

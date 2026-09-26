@@ -3,7 +3,7 @@
 namespace App\Support;
 
 use App\Events\SceneUpdated;
-use App\Game\Dice\DiceRoller;
+use App\Game\Dice\RollLedger;
 use App\Models\ActiveEffect;
 use App\Models\Actor;
 use App\Models\CampaignMacro;
@@ -14,10 +14,10 @@ use InvalidArgumentException;
 
 final class MacroExecutor
 {
-    public function __construct(private readonly DiceRoller $dice) {}
+    public function __construct(private readonly RollLedger $ledger) {}
 
     /** @return array{state:array<string,mixed>,messages:list<array<string,mixed>>} */
-    public function execute(CampaignMacro $macro, Scene $scene, User $user, ?int $actorId, array $targetActorIds, ?array $point): array
+    public function execute(CampaignMacro $macro, Scene $scene, User $user, string $requestId, ?int $actorId, array $targetActorIds, ?array $point): array
     {
         abort_unless((int) $macro->campaign_id === (int) $scene->campaign_id, 422);
         $campaign = $scene->campaign;
@@ -32,22 +32,23 @@ final class MacroExecutor
 
         $messages = [];
         $state = $scene->state;
-        foreach ($macro->commands as $command) {
+        foreach ($macro->commands as $commandIndex => $command) {
             $type = $command['type'] ?? null;
             if ($type === 'roll') {
                 $formula = mb_substr((string) ($command['formula'] ?? 'd20'), 0, 80);
                 try {
-                    $roll = $this->dice->roll($formula);
+                    $roll = $this->ledger->roll($scene, $user, [
+                        'requestId' => $requestId, 'step' => 'macro:'.$macro->id.':'.$commandIndex,
+                        'context' => 'custom', 'actorId' => $actor?->id, 'formula' => $formula,
+                        'label' => mb_substr((string) ($command['label'] ?? $macro->name), 0, 80),
+                    ]);
                 } catch (InvalidArgumentException $error) {
                     abort(422, $error->getMessage());
                 }
-                $message = [
-                    'id' => (string) Str::uuid(), 'userId' => $user->id, 'userName' => $user->name, 'type' => 'roll',
-                    'formula' => $roll['formula'], 'total' => $roll['total'], 'detail' => $roll['detail'],
-                    'critical' => $roll['critical'], 'fumble' => $roll['fumble'],
-                    'label' => mb_substr((string) ($command['label'] ?? $macro->name), 0, 80), 'createdAt' => now()->toIso8601String(),
-                ];
-                $state['chat'][] = $message;
+                $message = $this->ledger->chatMessage($roll, $user);
+                if (! collect($state['chat'] ?? [])->contains(fn ($item) => ($item['id'] ?? null) === $message['id'])) {
+                    $state['chat'][] = $message;
+                }
                 $messages[] = $message;
             } elseif ($type === 'chat') {
                 $text = trim(mb_substr((string) ($command['text'] ?? ''), 0, 1000));

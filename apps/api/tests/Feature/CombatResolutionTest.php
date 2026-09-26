@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\ActiveEffect;
 use App\Models\Actor;
 use App\Models\Scene;
 use App\Models\User;
@@ -52,6 +53,9 @@ class CombatResolutionTest extends TestCase
         $this->getJson($path.'?actorId='.$caster['id'])->assertForbidden();
         $this->postJson($path.'/save', ['actorId' => $caster['id']])->assertForbidden();
         $save = $this->postJson($path.'/save', ['actorId' => $target->id, 'mode' => 'advantage'])->assertOk()->assertJsonPath('save.success', true)->json('save');
+        $saveRollId = $save['roll']['id'];
+        $this->assertDatabaseHas('roll_records', ['id' => $saveRollId, 'visibility' => 'gm', 'context' => 'save']);
+        $this->assertContains($saveRollId, array_column($this->getJson('/api/scenes/'.$room['scene']['id'].'/rolls')->assertOk()->json('rolls'), 'id'));
         $this->assertSame(30, $target->fresh()->system['hp']['value']);
         $this->postJson($path.'/save', ['actorId' => $target->id])->assertJsonPath('save', $save);
         $this->getJson($path.'?actorId='.$target->id)->assertOk()->assertJsonPath('preview.damage', 10)->assertJsonPath('save', $save);
@@ -62,7 +66,12 @@ class CombatResolutionTest extends TestCase
         $chat = Scene::findOrFail($room['scene']['id'])->state['chat'];
         $this->assertArrayNotHasKey('saves', $chat[0]);
         $this->assertCount(1, $chat);
+        $outsider = User::factory()->create();
+        Sanctum::actingAs($outsider);
+        $this->postJson('/api/rooms/join', ['code' => $room['room']['code']])->assertOk();
+        $this->assertNotContains($saveRollId, array_column($this->getJson('/api/scenes/'.$room['scene']['id'].'/rolls')->assertOk()->json('rolls'), 'id'));
         Sanctum::actingAs($gm);
+        $this->assertContains($saveRollId, array_column($this->getJson('/api/scenes/'.$room['scene']['id'].'/rolls')->assertOk()->json('rolls'), 'id'));
         $this->getJson($path.'?actorId='.$target->id)->assertOk()->assertJsonPath('application.undone', true);
     }
 
@@ -86,7 +95,7 @@ class CombatResolutionTest extends TestCase
 
     public function test_generic_action_resource_is_consumed_once_and_undo_restores_it(): void
     {
-        [, $caster, , $base] = $this->setupBattle();
+        [$room, $caster, , $base] = $this->setupBattle();
         $actor = Actor::findOrFail($caster['id']);
         $system = $actor->system;
         $system['resources'] = [['id' => 'ki', 'name' => 'Ki', 'max' => 2, 'used' => 0, 'reset' => 'short']];
@@ -97,6 +106,9 @@ class CombatResolutionTest extends TestCase
         $data = ['actorId' => $actor->id, 'actionId' => 'flurry', 'requestId' => $requestId];
         $message = $this->postJson($base.'/actions', $data)->assertOk()
             ->assertJsonPath('actor.system.resources.0.used', 1)->json('message');
+        $records = DB::table('roll_records')->where('scene_id', $room['scene']['id'])->pluck('id')->all();
+        $this->assertCount(2, $records);
+        $this->assertEqualsCanonicalizing($records, array_column($message['rolls'], 'id'));
         $this->postJson($base.'/actions', $data)->assertOk()->assertJsonPath('actor.system.resources.0.used', 1);
         $this->postJson($base.'/actions/'.$message['id'].'/undo', ['actorId' => $actor->id])->assertOk()
             ->assertJsonPath('actor.system.resources.0.used', 0);
@@ -107,6 +119,37 @@ class CombatResolutionTest extends TestCase
         $actor->update(['system' => $system]);
         $this->postJson($base.'/actions', ['actorId' => $actor->id, 'actionId' => 'flurry', 'requestId' => (string) Str::uuid()])
             ->assertStatus(422)->assertJsonPath('message', 'Não há usos suficientes de Ki.');
+    }
+
+    public function test_advantage_attack_keeps_effect_dice_and_the_same_persisted_roll_id(): void
+    {
+        [$room, $caster, , $base] = $this->setupBattle();
+        $actor = Actor::findOrFail($caster['id']);
+        $system = $actor->system;
+        $system['actions'][] = [
+            'id' => 'blessed-attack', 'name' => 'Blessed Attack', 'kind' => 'attack',
+            'attackFormula' => '1d20+5', 'damageFormula' => '1d6+3',
+        ];
+        $actor->update(['system' => $system, 'name' => str_repeat('A', 120)]);
+        ActiveEffect::create([
+            'actor_id' => $actor->id, 'name' => 'Bless', 'duration' => ['unit' => 'permanent'],
+            'modifiers' => [['path' => 'roll.attack', 'mode' => 'add', 'value' => '1d4']],
+            'conditions' => [], 'metadata' => [], 'active' => true,
+        ]);
+
+        $request = [
+            'actorId' => $actor->id, 'actionId' => 'blessed-attack',
+            'requestId' => (string) Str::uuid(), 'mode' => 'advantage',
+        ];
+        $message = $this->postJson($base.'/actions', $request)->assertOk()
+            ->assertJsonPath('message.rolls.0.formula', '2d20kh1+5+d4')
+            ->assertJsonPath('message.rolls.0.mode', 'advantage')->json('message');
+        $this->assertSame($message['rolls'][0]['id'], DB::table('roll_records')
+            ->where('scene_id', $room['scene']['id'])->where('step', 'attack')->value('id'));
+        $this->assertLessThanOrEqual(80, strlen(DB::table('roll_records')->where('step', 'attack')->value('label')));
+        $this->postJson($base.'/actions', $request)->assertOk()
+            ->assertJsonPath('message.rolls.0.id', $message['rolls'][0]['id']);
+        $this->assertSame(2, DB::table('roll_records')->where('scene_id', $room['scene']['id'])->count());
     }
 
     public function test_concentration_uses_damage_absorbed_by_temp_hp_and_undo_restores_effect(): void

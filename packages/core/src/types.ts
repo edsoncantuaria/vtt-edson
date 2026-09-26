@@ -96,6 +96,9 @@ export const FogRectSchema = z.object({
 
 export const ChatMessageSchema = z.object({
   id: z.string(),
+  rollId: z.string().uuid().optional(),
+  context: z.string().optional(),
+  mode: z.enum(['normal','advantage','disadvantage']).optional(),
   userId: z.number(),
   userName: z.string(),
   type: z.enum(['text', 'roll', 'action']),
@@ -107,7 +110,7 @@ export const ChatMessageSchema = z.object({
   fumble: z.boolean().optional(),
   label: z.string().nullable().optional(),
   houseRules: z.array(z.string()).optional(),
-  rolls: z.array(z.object({kind:z.enum(['attack','damage']),formula:z.string(),total:z.number(),detail:z.string(),critical:z.boolean(),fumble:z.boolean()})).optional(),
+  rolls: z.array(z.object({id:z.string().uuid().optional(),kind:z.enum(['attack','damage']),formula:z.string(),total:z.number(),detail:z.string(),critical:z.boolean(),fumble:z.boolean()})).optional(),
   sourceActorId: z.number().optional(),
   damageType: z.string().nullable().optional(),
   save: z.object({ability:z.enum(['str','dex','con','int','wis','cha']),dc:z.number(),effect:z.enum(['half','none'])}).nullable().optional(),

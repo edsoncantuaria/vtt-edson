@@ -46,6 +46,8 @@ class ActorDeathSaveTest extends TestCase
         $first = $this->postJson($url, ['requestId' => $requestId])->assertOk()->assertJsonPath('alreadyRolled', false)
             ->assertJsonPath('message.sourceActorId', $actor->id);
         $this->assertSame('roll', $first->json('message.type'));
+        $this->assertSame($first->json('message.id'), $first->json('message.rollId'));
+        $this->assertDatabaseHas('roll_records', ['id' => $first->json('message.id'), 'context' => 'death-save', 'actor_id' => $actor->id]);
         $this->assertSame('d20', $first->json('message.formula'));
         $expected = DeathSaveRules::resolve($before, $first->json('message.total'))['system'];
         $this->assertSame($expected['deathSaves'], $actor->fresh()->system['deathSaves']);

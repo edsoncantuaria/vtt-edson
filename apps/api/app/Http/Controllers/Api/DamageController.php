@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Events\SceneUpdated;
 use App\Game\Dice\DiceRoller;
+use App\Game\Dice\RollLedger;
 use App\Http\Controllers\Concerns\AuthorizesScene;
 use App\Http\Controllers\Controller;
 use App\Models\ActiveEffect;
@@ -75,12 +76,12 @@ class DamageController extends Controller
         ]);
     }
 
-    public function save(Request $request, Scene $scene, string $messageId, DiceRoller $dice)
+    public function save(Request $request, Scene $scene, string $messageId, DiceRoller $dice, RollLedger $ledger)
     {
-        return DB::transaction(fn () => $this->saveLocked($request, $scene, $messageId, $dice));
+        return DB::transaction(fn () => $this->saveLocked($request, $scene, $messageId, $dice, $ledger));
     }
 
-    private function saveLocked(Request $request, Scene $scene, string $messageId, DiceRoller $dice)
+    private function saveLocked(Request $request, Scene $scene, string $messageId, DiceRoller $dice, RollLedger $ledger)
     {
         $actor = $this->target($request, $scene);
         $options = $request->validate([
@@ -109,7 +110,13 @@ class DamageController extends Controller
             try {
                 $effectiveSystem = $this->effects->effectiveSystem($actor);
                 $options['effectFormula'] = $this->effects->formulaSuffix($actor->activeEffects()->get(), 'roll.save');
-                $result = CombatRules::save($effectiveSystem, $message['save']['ability'], $message['save']['dc'], $options, $dice, $scene->campaign->house_rules ?? [], 'Salvaguarda de '.$message['save']['ability'].' · '.$message['label']);
+                $label = 'Salvaguarda de '.$message['save']['ability'].' · '.$message['label'];
+                $result = CombatRules::save($effectiveSystem, $message['save']['ability'], $message['save']['dc'], $options, $dice, $scene->campaign->house_rules ?? [], $label,
+                    fn ($formula, $rules, $mode) => $ledger->roll($scene, $request->user(), [
+                        'requestId' => $messageId, 'step' => 'save:'.$actor->id, 'context' => 'save',
+                        'actorId' => $actor->id, 'formula' => $formula, 'mode' => $mode, 'modePrepared' => true,
+                        'label' => $label, 'houseRules' => $rules, 'visibility' => 'gm',
+                    ]));
             } catch (InvalidArgumentException $e) {
                 abort(422, $e->getMessage());
             }
@@ -230,12 +237,12 @@ class DamageController extends Controller
         return response()->json(['actor' => $actor->toPayload(), 'undone' => (bool) ($data['undo'] ?? $operation->undone ?? false)]);
     }
 
-    public function concentration(Request $request, Scene $scene, string $messageId, DiceRoller $dice)
+    public function concentration(Request $request, Scene $scene, string $messageId, DiceRoller $dice, RollLedger $ledger)
     {
-        return DB::transaction(fn () => $this->concentrationLocked($request, $scene, $messageId, $dice));
+        return DB::transaction(fn () => $this->concentrationLocked($request, $scene, $messageId, $dice, $ledger));
     }
 
-    private function concentrationLocked(Request $request, Scene $scene, string $messageId, DiceRoller $dice)
+    private function concentrationLocked(Request $request, Scene $scene, string $messageId, DiceRoller $dice, RollLedger $ledger)
     {
         $actor = $this->target($request, $scene);
         $options = $request->validate(['mode' => ['sometimes', 'in:normal,advantage,disadvantage'], 'bonus' => ['sometimes', 'integer', 'between:-30,30']]);
@@ -250,7 +257,13 @@ class DamageController extends Controller
             try {
                 $effectiveSystem = $this->effects->apply($system, $actor->activeEffects()->get());
                 $options['effectFormula'] = $this->effects->formulaSuffix($actor->activeEffects()->get(), 'roll.save');
-                $result = CombatRules::save($effectiveSystem, 'con', $resolution['concentrationDc'], $options, $dice, $scene->campaign->house_rules ?? [], 'Concentração · '.$actor->name);
+                $label = 'Concentração · '.$actor->name;
+                $result = CombatRules::save($effectiveSystem, 'con', $resolution['concentrationDc'], $options, $dice, $scene->campaign->house_rules ?? [], $label,
+                    fn ($formula, $rules, $mode) => $ledger->roll($scene, $request->user(), [
+                        'requestId' => $messageId, 'step' => 'concentration:'.$actor->id, 'context' => 'concentration',
+                        'actorId' => $actor->id, 'formula' => $formula, 'mode' => $mode, 'modePrepared' => true,
+                        'label' => $label, 'houseRules' => $rules, 'visibility' => 'gm',
+                    ]));
             } catch (InvalidArgumentException $e) {
                 abort(422, $e->getMessage());
             }

@@ -3,14 +3,17 @@
 namespace App\Http\Controllers\Api;
 
 use App\Game\Dice\DiceRoller;
+use App\Game\Dice\RollLedger;
 use App\Http\Controllers\Controller;
 use App\Models\Campaign;
 use App\Models\RollTable;
 use App\Models\RollTableRoll;
+use App\Models\Scene;
 use App\Support\FiveToolsIntegrationService;
 use App\Support\RollTableExecutor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class RollTableController extends Controller
 {
@@ -41,19 +44,38 @@ class RollTableController extends Controller
         return response()->json(['table' => $rollTable->fresh()]);
     }
 
-    public function roll(Request $request, RollTable $rollTable, RollTableExecutor $executor, FiveToolsIntegrationService $integration): JsonResponse
+    public function roll(Request $request, RollTable $rollTable, RollTableExecutor $executor, FiveToolsIntegrationService $integration, RollLedger $ledger): JsonResponse
     {
         abort_unless($rollTable->campaign->isMember($request->user()), 403);
         abort_if($rollTable->campaign->roleFor($request->user()) === 'observer', 403, 'Observadores possuem acesso somente de leitura.');
         if (data_get($rollTable->metadata, 'fiveTools.gmOnly')) {
             abort_unless($rollTable->campaign->canManage($request->user()), 403, 'Esta tabela integrada é uma ferramenta do mestre.');
         }
-        $result = $executor->execute($rollTable);
-        $record = RollTableRoll::create([
-            'roll_table_id' => $rollTable->id, 'user_id' => $request->user()->id,
-            'total' => $result['roll']['total'], 'result' => $result,
-        ]);
-        $materialized = $integration->materializeRoll($rollTable, $record, $result['entry']);
+        $data = $request->validate(['sceneId' => ['required', 'integer', 'exists:scenes,id'], 'requestId' => ['required', 'uuid']]);
+        $scene = Scene::where('campaign_id', $rollTable->campaign_id)->findOrFail($data['sceneId']);
+        abort_unless($scene->memberFor($request->user()) !== null, 403);
+        [$record, $result, $materialized] = DB::transaction(function () use ($data, $executor, $integration, $ledger, $request, $rollTable, $scene) {
+            $scene = Scene::whereKey($scene->id)->lockForUpdate()->firstOrFail();
+            $roll = $ledger->roll($scene, $request->user(), [
+                'requestId' => $data['requestId'], 'step' => 'roll-table:'.$rollTable->id,
+                'context' => 'custom', 'formula' => $rollTable->formula, 'label' => $rollTable->name,
+                'visibility' => data_get($rollTable->metadata, 'fiveTools.gmOnly') ? 'gm' : 'public',
+            ]);
+            $existing = RollTableRoll::where('roll_id', $roll['id'])->first();
+            if ($existing) {
+                $stored = $existing->result;
+                $stored['roll'] = $roll;
+
+                return [$existing, $stored, $integration->materializeRoll($rollTable, $existing, $stored['entry'])];
+            }
+            $result = $executor->resolve($rollTable, $roll);
+            $record = RollTableRoll::create([
+                'roll_table_id' => $rollTable->id, 'user_id' => $request->user()->id, 'roll_id' => $roll['id'],
+                'total' => $roll['total'], 'result' => $result,
+            ]);
+
+            return [$record, $result, $integration->materializeRoll($rollTable, $record, $result['entry'])];
+        });
 
         return response()->json(['record' => $record, ...$result, ...$materialized]);
     }

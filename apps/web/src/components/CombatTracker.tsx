@@ -12,16 +12,25 @@ export function CombatTracker() {
   const [actorId, setActorId] = useState("");
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
+  const initiativeRequest = useRef<{ sceneId: number; id: string } | null>(null);
   const [ending, setEnding] = useState(false);
   async function action(path: string, data?: object, method = "POST") {
     if (!sceneId || pending.current) return;
     pending.current = true;
     setBusy(true);
+    const initiative = path === "/roll-initiative";
+    if (initiative && initiativeRequest.current?.sceneId !== sceneId)
+      initiativeRequest.current = { sceneId, id: crypto.randomUUID() };
     try {
       const res = await api<{ combat: Combat | null }>("/scenes/" + sceneId + "/combat" + path, {
         method,
-        body: data ? JSON.stringify(data) : undefined,
+        body: initiative
+          ? JSON.stringify({ requestId: initiativeRequest.current?.id })
+          : data
+            ? JSON.stringify(data)
+            : undefined,
       });
+      if (initiative) initiativeRequest.current = null;
       if (useSession.getState().sceneId === sceneId) setCombat(res.combat);
       if (res.combat) {
         await pluginRegistry.hooks.emit("combat:turn", {

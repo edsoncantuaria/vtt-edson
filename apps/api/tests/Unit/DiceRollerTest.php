@@ -47,19 +47,26 @@ class DiceRollerTest extends TestCase
 
     public function test_flags_natural_twenty_as_critical(): void
     {
-        // Roda até sair um 20 natural (probabilidade alta o bastante pra não flakear o teste).
-        $roller = new DiceRoller;
-        $result = null;
-        for ($i = 0; $i < 500; $i++) {
-            $result = $roller->roll('d20');
-            if ($result['natural'] === 20) {
-                break;
-            }
-        }
+        $roller = new DiceRoller(fn (int $min, int $max) => $max);
+        $result = $roller->roll('d20');
 
         $this->assertSame(20, $result['natural']);
         $this->assertTrue($result['critical']);
         $this->assertFalse($result['fumble']);
+    }
+
+    public function test_deterministic_injected_dice_cover_kept_result_and_extra_die(): void
+    {
+        $sequence = [2, 19, 3];
+        $roller = new DiceRoller(function () use (&$sequence) {
+            return array_shift($sequence);
+        });
+        $roll = $roller->roll('2d20kh1+5+d4');
+        $this->assertSame([2, 19, 3], $roll['rolls']);
+        $this->assertSame(19, $roll['natural']);
+        $this->assertSame(27, $roll['total']);
+        $this->assertFalse($roll['critical']);
+        $this->assertSame([], $sequence);
     }
 
     public function test_rejects_keep_count_larger_than_dice_count(): void

@@ -2,12 +2,16 @@
 
 namespace App\Game\Dice;
 
+use Closure;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 final class DiceRoller
 {
     private const DICE_TERM = '/^(\d*)d(\d+)(?:(kh|kl)(\d*))?$/i';
+
+    /** @param Closure(int,int):int|null $randomInteger Inject for deterministic rule tests only. */
+    public function __construct(private readonly ?Closure $randomInteger = null) {}
 
     /**
      * Rolls a bounded additive expression such as 2d20kh1+5, 8d6, or d20+d4+3.
@@ -58,7 +62,11 @@ final class DiceRoller
 
                 $rolls = [];
                 for ($i = 0; $i < $count; $i++) {
-                    $rolls[] = random_int(1, $sides);
+                    $rolled = $this->randomInteger ? ($this->randomInteger)(1, $sides) : random_int(1, $sides);
+                    if (! is_int($rolled) || $rolled < 1 || $rolled > $sides) {
+                        throw new InvalidArgumentException('O gerador devolveu um resultado fora dos limites do dado.');
+                    }
+                    $rolls[] = $rolled;
                 }
                 $kept = $rolls;
                 $dropped = [];

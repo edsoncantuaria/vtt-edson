@@ -13,6 +13,14 @@ final class RollTableExecutor
     {
         abort_unless($table->enabled, 422, 'Esta tabela está desativada.');
         $roll = $this->dice->roll($table->formula);
+
+        return $this->resolve($table, $roll);
+    }
+
+    /** @param array<string, mixed> $roll */
+    public function resolve(RollTable $table, array $roll): array
+    {
+        abort_unless($table->enabled, 422, 'Esta tabela está desativada.');
         $entry = collect($table->entries)->first(fn ($entry) => $roll['total'] >= (int) $entry['min'] && $roll['total'] <= (int) $entry['max']);
         abort_unless($entry !== null, 422, 'A rolagem não corresponde a nenhuma faixa da tabela.');
 

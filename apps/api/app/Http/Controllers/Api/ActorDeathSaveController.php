@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Events\SceneUpdated;
-use App\Game\Dice\DiceRoller;
+use App\Game\Dice\RollLedger;
 use App\Http\Controllers\Concerns\AuthorizesScene;
 use App\Http\Controllers\Controller;
 use App\Models\Actor;
@@ -13,14 +13,13 @@ use App\Support\Dnd\DeathSaveRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 /** Scene lock is acquired by SerializeSceneWrites before locking the actor. */
 final class ActorDeathSaveController extends Controller
 {
     use AuthorizesScene;
 
-    public function store(Request $request, Scene $scene, Actor $actor, DiceRoller $dice): JsonResponse
+    public function store(Request $request, Scene $scene, Actor $actor, RollLedger $ledger): JsonResponse
     {
         $member = $this->requireParticipant($request, $scene);
         abort_unless($actor->campaign_id === $scene->campaign_id, 404);
@@ -42,19 +41,14 @@ final class ActorDeathSaveController extends Controller
         abort_if(($system['deathSaves']['success'] ?? 0) >= 3 || ($system['deathSaves']['failure'] ?? 0) >= 3
             || array_intersect($system['conditions'] ?? [], ['estabilizado', 'morto']), 422, 'O desfecho das salvaguardas já foi resolvido.');
 
-        $rolled = $dice->roll('d20');
+        $rolled = $ledger->roll($scene, $request->user(), [
+            'requestId' => $data['requestId'], 'context' => 'death-save', 'actorId' => $actor->id,
+            'formula' => 'd20', 'houseRules' => [], 'label' => $actor->name.' · Salvaguarda contra morte',
+        ]);
         $resolved = DeathSaveRules::resolve($system, $rolled['natural']);
         $actor->system = $resolved['system'];
         $actor->save();
-        $message = [
-            'id' => (string) Str::uuid(), 'userId' => $request->user()->id,
-            'userName' => $request->user()->name, 'createdAt' => now()->toIso8601String(),
-            'type' => 'roll', 'sourceActorId' => $actor->id,
-            'label' => Str::limit($actor->name.' · Salvaguarda contra morte', 80, ''),
-            'formula' => $rolled['formula'], 'total' => $rolled['total'], 'detail' => $rolled['detail'],
-            'critical' => $rolled['critical'], 'fumble' => $rolled['fumble'],
-            'text' => $resolved['outcome'],
-        ];
+        $message = $ledger->chatMessage($rolled, $request->user(), $resolved['outcome']);
         DB::table('actor_death_save_rolls')->insert([
             'scene_id' => $scene->id, 'actor_id' => $actor->id, 'user_id' => $request->user()->id,
             'request_id' => $data['requestId'], 'message' => json_encode($message, JSON_THROW_ON_ERROR),

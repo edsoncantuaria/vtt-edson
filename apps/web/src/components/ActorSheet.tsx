@@ -48,6 +48,7 @@ export function ActorSheet() {
   const [mode, setMode] = useState("normal");
   const [query, setQuery] = useState("");
   const actionRequest = useRef<{ key: string; id: string } | null>(null);
+  const sheetRollRequest = useRef<{ key: string; id: string } | null>(null);
   const deathSaveRequest = useRef<{ sceneId: number; actorId: number; id: string } | null>(null);
   const importer = useRef<HTMLInputElement>(null);
   const actor = actors.find((a) => a.id === selectedActorId);
@@ -55,11 +56,7 @@ export function ActorSheet() {
   const canEdit = actor && (isManagerRole(role) || actor.ownerUserId === user?.id);
   const report = (e: unknown) =>
     setError(e instanceof Error ? e.message : "Não foi possível concluir a ação.");
-  const form = (mod: number) =>
-    buildModifierFormula(mod, {
-      advantage: mode === "advantage",
-      disadvantage: mode === "disadvantage",
-    });
+  const form = (mod: number) => buildModifierFormula(mod);
   useEffect(() => {
     if (actorId) void pluginRegistry.hooks.emit("actor:opened", { actorId });
     setView("quick");
@@ -85,8 +82,32 @@ export function ActorSheet() {
   async function roll(formula: string, label: string) {
     if (!sceneId || !actor || !canEdit || busy) return;
     setBusy(true);
+    const labelWithActor = `${actor.name} · ${label}`.slice(0, 80);
+    const simpleD20 = /^(?:1)?d20(?:[+-]\d+)?$/i.test(formula);
+    const rollMode =
+      simpleD20 && (mode === "advantage" || mode === "disadvantage") ? mode : "normal";
+    const context = label.startsWith("Perícia:")
+      ? "skill"
+      : label.startsWith("Salvaguarda")
+        ? "save"
+        : label === "Iniciativa"
+          ? "initiative"
+          : label.includes("ataque")
+            ? "attack"
+            : label.includes("dano")
+              ? "damage"
+              : "ability";
+    const key = `${sceneId}:${actor.id}:${formula}:${labelWithActor}:${rollMode}`;
+    if (sheetRollRequest.current?.key !== key)
+      sheetRollRequest.current = { key, id: crypto.randomUUID() };
     try {
-      await rollToChat(sceneId, formula, `${actor.name} · ${label}`.slice(0, 80));
+      await rollToChat(sceneId, formula, labelWithActor, {
+        requestId: sheetRollRequest.current.id,
+        actorId: actor.id,
+        mode: rollMode,
+        context,
+      });
+      sheetRollRequest.current = null;
     } catch (e) {
       report(e);
     } finally {

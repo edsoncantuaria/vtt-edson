@@ -325,6 +325,7 @@ export const CombatParticipantSchema = z.object({
   name: z.string(),
   imgUrl: z.string().nullable(),
   initiative: z.number().nullable(),
+  rollId: z.string().uuid().nullable().optional(),
   hidden: z.boolean(),
   sort: z.number(),
 })

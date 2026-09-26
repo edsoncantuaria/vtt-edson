@@ -16,6 +16,7 @@ final class SendSceneChatRequest extends FormRequest
         return [
             'text' => ['required', 'string', 'max:1000'],
             'label' => ['nullable', 'string', 'max:80'],
+            'requestId' => ['sometimes', 'uuid'],
         ];
     }
 }

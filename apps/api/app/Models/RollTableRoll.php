@@ -10,6 +10,7 @@ use Illuminate\Support\Carbon;
  * @property int $id
  * @property int $roll_table_id
  * @property int $user_id
+ * @property string|null $roll_id
  * @property int $total
  * @property array<string, mixed> $result
  * @property Carbon $created_at

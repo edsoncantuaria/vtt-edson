@@ -105,7 +105,7 @@ final class CombatRules
         return (int) floor((($system['abilities'][$ability]['score'] ?? 10) - 10) / 2);
     }
 
-    public static function save(array $system, string $ability, int $dc, array $options, DiceRoller $dice, array $houseRules, string $label): array
+    public static function save(array $system, string $ability, int $dc, array $options, DiceRoller $dice, array $houseRules, string $label, ?\Closure $persistRoll = null): array
     {
         // Monster stat blocks often specify the total, including bespoke bonuses.
         $bonus = $system['saves'][$ability]['bonus'] ?? null;
@@ -116,7 +116,8 @@ final class CombatRules
             'advantage' => '2d20kh1', 'disadvantage' => '2d20kl1', default => '1d20'
         };
         $adjusted = HouseRules::apply($formula.($bonus >= 0 ? '+' : '').$bonus, $label, $houseRules);
-        $roll = $dice->roll($adjusted['formula'].($options['effectFormula'] ?? ''));
+        $effectiveFormula = $adjusted['formula'].($options['effectFormula'] ?? '');
+        $roll = $persistRoll ? $persistRoll($effectiveFormula, $adjusted['rules'], $mode) : $dice->roll($effectiveFormula);
 
         return ['ability' => $ability, 'dc' => $dc, 'success' => $roll['total'] >= $dc, 'roll' => $roll, 'houseRules' => $adjusted['rules'], 'mode' => $mode];
     }

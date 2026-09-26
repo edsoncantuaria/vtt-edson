@@ -33,6 +33,7 @@ export function ChatPanel() {
   const [busy, setBusy] = useState(false);
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const pendingRoll = useRef<{ key: string; id: string } | null>(null);
   useEffect(() => {
     if (stick.current && log.current) log.current.scrollTop = log.current.scrollHeight;
   }, [state.chat]);
@@ -45,8 +46,16 @@ export function ChatPanel() {
       return;
     }
     setBusy(true);
+    const isRoll = message.toLowerCase().startsWith("/roll ");
+    const key = `${sceneId}:${message}`;
+    if (isRoll && pendingRoll.current?.key !== key)
+      pendingRoll.current = { key, id: crypto.randomUUID() };
     try {
-      await updateScene(sceneId, "/chat", { text: message });
+      await updateScene(sceneId, "/chat", {
+        text: message,
+        ...(isRoll ? { requestId: pendingRoll.current?.id } : {}),
+      });
+      pendingRoll.current = null;
       setText("");
       stick.current = true;
     } catch (e) {
@@ -127,6 +136,9 @@ export function ChatPanel() {
                   <span>{m.label || "Rolagem de dados"}</span>
                   <code>{m.formula}</code>
                   <small>{m.detail}</small>
+                  {m.rollId && (
+                    <small title={m.rollId}>ID da rolagem: {m.rollId.slice(0, 8)}</small>
+                  )}
                 </div>
                 <strong className={m.critical ? "critical" : m.fumble ? "fumble" : ""}>
                   {m.total}

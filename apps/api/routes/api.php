@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\SceneCanvasController;
 use App\Http\Controllers\Api\SceneChatController;
 use App\Http\Controllers\Api\SceneController;
 use App\Http\Controllers\Api\SceneGeometryController;
+use App\Http\Controllers\Api\SceneRollController;
 use App\Http\Controllers\Api\SceneTokenController;
 use App\Http\Middleware\SerializeSceneWrites;
 use Illuminate\Support\Facades\Broadcast;
@@ -140,6 +141,8 @@ Route::middleware(['auth:sanctum', SerializeSceneWrites::class])->group(function
     Route::post('/scenes/{scene}/canvas/pings', [SceneCanvasController::class, 'ping']);
     Route::delete('/scenes/{scene}/canvas/{kind}/{id}', [SceneCanvasController::class, 'destroy']);
     Route::post('/scenes/{scene}/chat', [SceneChatController::class, 'store']);
+    Route::get('/scenes/{scene}/rolls', [SceneRollController::class, 'index']);
+    Route::post('/scenes/{scene}/rolls', [SceneRollController::class, 'store']);
     Route::post('/scenes/{scene}/actors/{actor}/death-save', [ActorDeathSaveController::class, 'store']);
     Route::get('/scenes/{scene}/private-messages', [PrivateMessageController::class, 'index']);
     Route::post('/scenes/{scene}/private-messages', [PrivateMessageController::class, 'store']);
