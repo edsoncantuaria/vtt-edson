@@ -147,7 +147,24 @@ export const ActorResourceSchema = z.object({
   max: z.number().int().min(0).max(100000),
   used: z.number().int().min(0).max(100000),
   reset: z.enum(['short','long','manual']).default('manual'),
-}).refine((resource) => resource.used <= resource.max, { path: ['used'], message: 'O recurso gasto não pode exceder o máximo.' })
+  kind: z.enum(['homebrew','rage','focus','ki','channel-divinity']).optional(),
+  source: z.string().max(160).optional(),
+  edition: z.enum(['5e-2014','5e-2024']).optional(),
+  defaultCost: z.number().int().min(1).max(1000).optional(),
+  recovery: z.object({short:z.enum(['none','one','full']),long:z.enum(['none','one','full'])}).optional(),
+  scaling: z.object({className:z.string().min(1).max(120),classId:z.number().int().positive().optional(),classSource:z.string().max(80).optional(),byLevel:z.record(z.string().regex(/^(?:[1-9]|1[0-9]|20)$/),z.number().int().min(0).max(100000))}).optional(),
+}).refine((resource) => resource.used <= resource.max,
+  { path: ['used'], message: 'O recurso gasto não pode exceder o máximo.' })
+  .refine((resource) => !/^(?:slot:|document:)/.test(resource.id) && resource.id !== 'inspiration',
+    { path: ['id'], message: 'Identificador reservado para recursos integrados.' })
+
+export const ResourcePoolSchema = z.object({
+  id: z.string(), actorId: z.number().int().nullable(),
+  kind: z.string(), name: z.string(), current: z.number().int(), max: z.number().int(), used: z.number().int(),
+  source: z.string(), edition: z.enum(['5e-2014','5e-2024']), defaultCost: z.number().int().min(1),
+  recovery: z.object({short:z.enum(['none','one','full']),long:z.enum(['none','one','full'])}),
+})
+export type ResourcePool = z.infer<typeof ResourcePoolSchema>
 
 export const FeatureSchema = z.object({
   id: z.string(),
@@ -276,7 +293,7 @@ export const ActorSystemSchema = z.object({
   spells: z.object({
     slots: z.preprocess(
       (value) => Array.isArray(value) && value.length === 0 ? {} : value,
-      z.record(z.string(), z.object({ max: z.number().int().min(0).max(100), used: z.number().int().min(0).max(100) })
+      z.record(z.string(), z.object({ max: z.number().int().min(0).max(100), used: z.number().int().min(0).max(100),reset:z.enum(['short','long','manual']).optional() })
         .refine((slot) => slot.used <= slot.max, { path: ['used'], message: 'Espaços gastos não podem exceder o máximo.' })).default({}),
     ),
     known: z.array(KnownSpellSchema).default([]),
@@ -312,6 +329,7 @@ export const ActorSchema = z.object({
   imgPath: z.string().nullable().optional(),
   imgUrl: z.string().nullable().optional(),
   system: ActorSystemSchema,
+  resourcePools: z.array(ResourcePoolSchema).optional(),
   documents: z.array(ActorDocumentSchema).default([]),
   activeEffects: z.array(ActiveEffectSchema).default([]),
 })

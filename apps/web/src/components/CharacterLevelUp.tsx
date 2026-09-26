@@ -559,6 +559,18 @@ export function CharacterLevelUp({ actor, onClose }: { actor: Actor; onClose: ()
               <dd>{pending.preview.hp.join(" → ")}</dd>
               <dt>Bônus de proficiência</dt>
               <dd>{pending.preview.proficiency.join(" → ")}</dd>
+              {pending.preview.resources?.[1]?.map((resource, index) => {
+                const previous = pending.preview.resources[0][index];
+                return resource.max !== previous?.max ? (
+                  <div key={resource.id}>
+                    <dt>{resource.name} · máximo</dt>
+                    <dd>
+                      {previous?.max ?? 0} → {resource.max} (usados: {resource.used}, sem
+                      recuperação automática)
+                    </dd>
+                  </div>
+                ) : null;
+              })}
             </dl>
             {pending.notes.map((note, index) => (
               <p key={index}>{note}</p>

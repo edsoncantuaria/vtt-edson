@@ -12,6 +12,27 @@ import {
   type CustomActionPreset,
 } from "../../lib/customActions";
 import type { MutateActorSystem } from "./ActorEditorFields";
+import { useSession } from "../../store/session";
+
+const RESOURCE_KINDS = [
+  ["homebrew", "Homebrew / outro"],
+  ["rage", "Fúria"],
+  ["ki", "Ki (2014)"],
+  ["focus", "Foco (2024)"],
+  ["channel-divinity", "Canalizar Divindade"],
+] as const;
+type Recovery = "none" | "one" | "full";
+function recoveryFor(
+  kind: string | undefined,
+  edition: string,
+  reset: string,
+): { short: Recovery; long: Recovery } {
+  if (kind === "rage") return { short: edition === "5e-2024" ? "one" : "none", long: "full" };
+  if (kind === "focus" || kind === "ki") return { short: "full", long: "full" };
+  if (kind === "channel-divinity")
+    return { short: edition === "5e-2024" ? "one" : "full", long: "full" };
+  return { short: reset === "short" ? "full" : "none", long: reset === "manual" ? "none" : "full" };
+}
 
 export function ActionsSection({
   system,
@@ -24,6 +45,7 @@ export function ActionsSection({
   mutate: MutateActorSystem;
   canManage: boolean;
 }) {
+  const ruleset = useSession((state) => state.ruleset) ?? "5e-2014";
   return (
     <>
       <p className="panel-hint">
@@ -39,12 +61,76 @@ export function ActionsSection({
         {system.resources.map((resource, index) => (
           <div className="editor-grid" key={resource.id}>
             <label>
+              Tipo
+              <select
+                value={resource.kind ?? "homebrew"}
+                onChange={(event) =>
+                  mutate((next) => {
+                    const item = next.resources[index];
+                    item.kind = event.target.value as typeof item.kind;
+                    item.recovery = recoveryFor(item.kind, ruleset, item.reset);
+                    item.edition = ruleset;
+                  })
+                }
+              >
+                {RESOURCE_KINDS.map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               Nome
               <input
                 value={resource.name}
                 onChange={(event) =>
                   mutate((next) => {
                     next.resources[index].name = event.target.value;
+                  })
+                }
+              />
+            </label>
+            <label>
+              Origem / classe / documento
+              <input
+                maxLength={160}
+                value={resource.source ?? ""}
+                placeholder="Classe · SRD, item ou criação própria"
+                onChange={(event) =>
+                  mutate((next) => {
+                    next.resources[index].source = event.target.value;
+                  })
+                }
+              />
+            </label>
+            <label>
+              Edição do recurso
+              <select
+                value={resource.edition ?? ruleset}
+                onChange={(event) =>
+                  mutate((next) => {
+                    next.resources[index].edition = event.target.value as "5e-2014" | "5e-2024";
+                  })
+                }
+              >
+                <option value="5e-2014">5e 2014</option>
+                <option value="5e-2024">5e 2024</option>
+              </select>
+            </label>
+            <label>
+              Custo padrão de cada ação
+              <input
+                type="number"
+                min={1}
+                max={1000}
+                value={resource.defaultCost ?? 1}
+                onChange={(event) =>
+                  mutate((next) => {
+                    next.resources[index].defaultCost = Math.max(
+                      1,
+                      Math.min(1000, Number(event.target.value)),
+                    );
                   })
                 }
               />
@@ -84,21 +170,116 @@ export function ActionsSection({
                 }
               />
             </label>
-            <label>
-              Recupera
-              <select
-                value={resource.reset}
-                onChange={(event) =>
-                  mutate((next) => {
-                    next.resources[index].reset = event.target.value as "short" | "long" | "manual";
-                  })
-                }
-              >
-                <option value="short">Descanso curto</option>
-                <option value="long">Descanso longo</option>
-                <option value="manual">Manual</option>
-              </select>
-            </label>
+            {(["short", "long"] as const).map((rest) => (
+              <label key={rest}>
+                Recuperação no descanso {rest === "short" ? "curto" : "longo"}
+                <select
+                  value={
+                    resource.recovery?.[rest] ??
+                    recoveryFor(resource.kind, resource.edition ?? ruleset, resource.reset)[rest]
+                  }
+                  onChange={(event) =>
+                    mutate((next) => {
+                      const item = next.resources[index];
+                      item.recovery = {
+                        ...recoveryFor(item.kind, item.edition ?? ruleset, item.reset),
+                        ...item.recovery,
+                        [rest]: event.target.value as Recovery,
+                      };
+                    })
+                  }
+                >
+                  <option value="none">Não recupera</option>
+                  <option value="one">Recupera 1 uso</option>
+                  <option value="full">Recupera todos</option>
+                </select>
+              </label>
+            ))}
+            {canManage && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={!!resource.scaling}
+                  onChange={(event) =>
+                    mutate((next) => {
+                      next.resources[index].scaling = event.target.checked
+                        ? { className: "", byLevel: {} }
+                        : undefined;
+                    })
+                  }
+                />{" "}
+                Evoluir máximo pela tabela da classe
+              </label>
+            )}
+            {canManage && resource.scaling && (
+              <>
+                <label>
+                  Classe exata da progressão
+                  {(system.progression?.classes.length ?? 0) > 0 ? (
+                    <select
+                      value={resource.scaling.classId ?? ""}
+                      onChange={(event) =>
+                        mutate((next) => {
+                          const cls = next.progression?.classes.find(
+                            (row) => row.classId === Number(event.target.value),
+                          );
+                          if (!cls) return;
+                          next.resources[index].scaling = {
+                            ...next.resources[index].scaling!,
+                            classId: cls.classId,
+                            className: cls.name,
+                            classSource: cls.source,
+                          };
+                        })
+                      }
+                    >
+                      <option value="">Selecionar classe da ficha</option>
+                      {system
+                        .progression!.classes.filter((row) => row.classId)
+                        .map((row) => (
+                          <option key={row.classId} value={row.classId}>
+                            {row.name} · {row.source ?? "fonte da ficha"}
+                          </option>
+                        ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={resource.scaling.className}
+                      maxLength={120}
+                      placeholder="Classe da ficha"
+                      onChange={(event) =>
+                        mutate((next) => {
+                          next.resources[index].scaling!.className = event.target.value;
+                        })
+                      }
+                    />
+                  )}
+                </label>
+                {Array.from({ length: 20 }, (_, i) => i + 1).map((level) => (
+                  <label key={level}>
+                    Máximo no nível {level}
+                    <input
+                      type="number"
+                      min={0}
+                      max={100000}
+                      placeholder="sem mudança"
+                      value={resource.scaling?.byLevel[String(level)] ?? ""}
+                      onChange={(event) =>
+                        mutate((next) => {
+                          const table = next.resources[index].scaling!.byLevel;
+                          if (event.target.value === "") delete table[String(level)];
+                          else
+                            table[String(level)] = Math.max(
+                              0,
+                              Math.min(100000, Number(event.target.value)),
+                            );
+                        })
+                      }
+                    />
+                  </label>
+                ))}
+              </>
+            )}
             <button
               type="button"
               className="danger"
@@ -129,6 +310,11 @@ export function ActionsSection({
                 max: 1,
                 used: 0,
                 reset: "manual",
+                kind: "homebrew",
+                source: "Ficha · homebrew",
+                edition: ruleset,
+                defaultCost: 1,
+                recovery: { short: "none", long: "none" },
               });
             })
           }
@@ -627,13 +813,12 @@ function ActionEditor({
             onChange={(event) =>
               mutate((next) => {
                 next.actions[index].resourceId = event.target.value || undefined;
-                next.actions[index].resourceCost = event.target.value
-                  ? (next.actions[index].resourceCost ?? 1)
-                  : undefined;
+                next.actions[index].resourceCost = undefined; // Default comes from the chosen pool.
               })
             }
           >
             <option value="">Sem recurso genérico</option>
+            <option value="inspiration">Inspiração · {system.inspiration ? "1/1" : "0/1"}</option>
             {system.resources.map((resource) => (
               <option value={resource.id} key={resource.id}>
                 {resource.name} · {resource.max - resource.used}/{resource.max}
@@ -648,7 +833,12 @@ function ActionEditor({
               type="number"
               min={1}
               max={1000}
-              value={action.resourceCost ?? 1}
+              value={
+                action.resourceCost ??
+                system.resources.find((resource) => resource.id === action.resourceId)
+                  ?.defaultCost ??
+                1
+              }
               onChange={(event) =>
                 mutate((next) => {
                   next.actions[index].resourceCost = Math.max(1, Number(event.target.value));

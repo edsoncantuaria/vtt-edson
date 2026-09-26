@@ -13,6 +13,8 @@ import {
 import { api } from "../../lib/api";
 import { useSession } from "../../store/session";
 import { Icon } from "../Icon";
+import { ResourcePoolStrip } from "./ResourcePoolStrip";
+import { unavailableResource } from "../../lib/resourceAvailability";
 
 const ABILITIES: Ability[] = ["str", "dex", "con", "int", "wis", "cha"];
 const ECONOMY_ORDER = ["action", "bonus", "reaction", "other"] as const;
@@ -303,7 +305,6 @@ export function ActionsTab({
   actor,
   canEdit,
   busy,
-  change,
   executeAction,
 }: {
   actor: Actor;
@@ -330,53 +331,7 @@ export function ActionsTab({
         Alvos, salvaguardas e dano são resolvidos no chat. Confirme reações e exceções antes de
         aplicar. A economia do turno fica sob controle da mesa.
       </p>
-      {!!actor.system.resources.length && (
-        <div className="slot-list">
-          {actor.system.resources.map((resource) => (
-            <div key={resource.id}>
-              <span>
-                {resource.name}
-                <small>
-                  {resource.reset === "short"
-                    ? "descanso curto"
-                    : resource.reset === "long"
-                      ? "descanso longo"
-                      : "recuperação manual"}
-                </small>
-              </span>
-              <b>
-                {Math.max(0, resource.max - resource.used)}/{resource.max}
-              </b>
-              {canEdit && (
-                <>
-                  <button
-                    disabled={busy || resource.used === 0}
-                    onClick={() =>
-                      void change((system) => {
-                        const item = system.resources.find((entry) => entry.id === resource.id);
-                        if (item) item.used = Math.max(0, item.used - 1);
-                      })
-                    }
-                  >
-                    Recuperar
-                  </button>
-                  <button
-                    disabled={busy || resource.used >= resource.max}
-                    onClick={() =>
-                      void change((system) => {
-                        const item = system.resources.find((entry) => entry.id === resource.id);
-                        if (item) item.used = Math.min(item.max, item.used + 1);
-                      })
-                    }
-                  >
-                    Gastar
-                  </button>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      <ResourcePoolStrip actor={actor} filter="other" canEdit={canEdit} busy={busy} />
       {sortedActions.map((action) => (
         <article key={action.id}>
           <div>
@@ -431,16 +386,24 @@ export function ActionsTab({
           )}
           {action.resourceId && (
             <small>
-              Consome {action.resourceCost ?? 1} de{" "}
+              Consome{" "}
+              {action.resourceCost ??
+                actor.system.resources.find((resource) => resource.id === action.resourceId)
+                  ?.defaultCost ??
+                1}{" "}
+              de{" "}
               {actor.system.resources.find((resource) => resource.id === action.resourceId)?.name ??
-                "recurso configurado"}
+                "Inspiração"}
               .
             </small>
+          )}
+          {unavailableResource(actor, action) && (
+            <small role="status">{unavailableResource(actor, action)}</small>
           )}
           {action.description && <p>{action.description}</p>}
           <button
             className="primary"
-            disabled={!canEdit || busy}
+            disabled={!canEdit || busy || !!unavailableResource(actor, action)}
             onClick={() => void executeAction(action.id)}
           >
             <Icon name={action.kind === "spell" ? "spark" : "swords"} size={15} />
@@ -490,39 +453,7 @@ export function SpellsTab({
       <h4 className="sheet-section-title">
         Espaços de magia <span>Livres / total</span>
       </h4>
-      <div className="slot-list">
-        {Object.entries(actor.system.spells.slots)
-          .filter(([, slot]) => slot.max > 0)
-          .map(([level, slot]) => (
-            <div key={level}>
-              <span>{level}º círculo</span>
-              <b>
-                {slot.max - slot.used}/{slot.max}
-              </b>
-              <button
-                disabled={!canEdit || busy || slot.used === 0}
-                aria-label={`Recuperar espaço do círculo ${level}`}
-                onClick={() =>
-                  void change((system) => {
-                    system.spells.slots[level].used--;
-                  })
-                }
-              >
-                <Icon name="plus" size={14} />
-              </button>
-              <button
-                disabled={!canEdit || busy || slot.used >= slot.max}
-                onClick={() =>
-                  void change((system) => {
-                    system.spells.slots[level].used++;
-                  })
-                }
-              >
-                Gastar
-              </button>
-            </div>
-          ))}
-      </div>
+      <ResourcePoolStrip actor={actor} filter="slots" canEdit={canEdit} busy={busy} />
       {!actor.system.spells.known.length && (
         <p className="panel-hint">Adicione suas magias pelo compêndio ou edite a ficha.</p>
       )}
@@ -556,7 +487,8 @@ export function SpellsTab({
                 disabled={
                   !canEdit ||
                   busy ||
-                  (!!castAction.spellSlotLevel && (!slot || slot.used >= slot.max))
+                  (!!castAction.spellSlotLevel && (!slot || slot.used >= slot.max)) ||
+                  !!unavailableResource(actor, castAction)
                 }
                 onClick={() => void executeAction(castAction.id)}
               >

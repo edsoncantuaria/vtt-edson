@@ -1,5 +1,5 @@
 import type { Actor } from "@vtt/core";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useSession } from "../../store/session";
 import { CONDITION_LABELS, conditionLabel } from "../../lib/conditions";
@@ -68,6 +68,7 @@ export function ActorEffectsTab({
     }>
   >([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const restRequest = useRef<{ key: string; requestId: string } | null>(null);
 
   async function run<T>(operation: () => Promise<T>): Promise<T | undefined> {
     if (busy) return;
@@ -133,13 +134,20 @@ export function ActorEffectsTab({
   }
 
   async function rest(rest: "short" | "long") {
+    const key = `${actor.id}:${rest}`;
+    if (restRequest.current?.key !== key)
+      restRequest.current = { key, requestId: crypto.randomUUID() };
+    const requestId = restRequest.current.requestId;
     const result = await run(() =>
       api<{ actor: Actor }>(`/actors/${actor.id}/rest`, {
         method: "POST",
-        body: JSON.stringify({ rest }),
+        body: JSON.stringify({ rest, requestId }),
       }),
     );
-    if (result) upsertActor(result.actor);
+    if (result) {
+      upsertActor(result.actor);
+      restRequest.current = null;
+    }
   }
 
   async function viewHistory() {

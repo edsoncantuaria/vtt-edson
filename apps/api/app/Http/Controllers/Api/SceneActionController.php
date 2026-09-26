@@ -16,6 +16,8 @@ use App\Support\Dnd\CombatRules;
 use App\Support\Dnd\ConditionRules;
 use App\Support\Dnd\EffectAudit;
 use App\Support\Dnd\HouseRules;
+use App\Support\Dnd\ResourceAudit;
+use App\Support\Dnd\ResourcePool;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -147,31 +149,22 @@ final class SceneActionController extends Controller
         if ($damageFormula = CombatRules::damageFormula($effectiveSystem, $action)) {
             $action['damageFormula'] = $damageFormula;
         }
-        $resourceBefore = ['slots' => $system['spells']['slots'] ?? [], 'resources' => $system['resources'] ?? [], 'concentration' => $system['concentration'] ?? null];
+        $resourceBefore = ['slots' => $system['spells']['slots'] ?? [], 'resources' => $system['resources'] ?? [],
+            'inspiration' => $system['inspiration'] ?? false, 'concentration' => $system['concentration'] ?? null];
         $slotLevel = $action['spellSlotLevel'] ?? null;
-        if ($slotLevel !== null) {
-            abort_unless(is_int($slotLevel) && $slotLevel >= 1 && $slotLevel <= 9, 422, 'Nível de espaço inválido.');
-            $slot = $system['spells']['slots'][$slotLevel] ?? null;
-            abort_unless($slot && ($slot['used'] ?? 0) < ($slot['max'] ?? 0), 422, 'Não há espaço de magia disponível neste nível.');
-        }
-        $genericResource = null;
-        if (isset($action['resourceId'])) {
-            $resourceIndex = collect($system['resources'] ?? [])->search(fn ($resource) => ($resource['id'] ?? null) === $action['resourceId']);
-            abort_unless($resourceIndex !== false, 422, 'O recurso configurado nesta ação não existe mais na ficha.');
-            $genericResource = $system['resources'][$resourceIndex];
-            $cost = (int) ($action['resourceCost'] ?? 1);
-            $available = max(0, (int) ($genericResource['max'] ?? 0) - (int) ($genericResource['used'] ?? 0));
-            abort_unless($available >= $cost, 422, 'Não há usos suficientes de '.$genericResource['name'].'.');
-        }
+        $genericResource = isset($action['resourceId']) ? collect($system['resources'] ?? [])->firstWhere('id', $action['resourceId']) : null;
         $document = null;
         if (isset($action['documentId'])) {
             $document = ActorDocument::query()->where('actor_id', $actor->id)->lockForUpdate()->findOrFail($action['documentId']);
             $charges = $document->charges;
-            abort_unless($charges !== null, 422, 'Este documento não possui cargas configuradas.');
-            $chargeCost = (int) ($action['chargeCost'] ?? 1);
-            abort_unless((int) $charges['value'] >= $chargeCost, 422, 'Não há cargas suficientes em '.$document->name.'.');
             $resourceBefore['documentCharges'] = ['id' => $document->id, 'charges' => $charges];
         }
+        try {
+            $resourceCosts = ResourcePool::quote($system, $action, $scene->campaign->ruleset, $document?->charges);
+        } catch (InvalidArgumentException $exception) {
+            abort(422, $exception->getMessage());
+        }
+        $beforePools = $resourceCosts ? ResourceAudit::snapshot($actor, $system) : [];
         $rolls = [];
         $appliedRules = [];
         try {
@@ -231,17 +224,12 @@ final class SceneActionController extends Controller
             // later step (damage/healing) has an invalid formula.
             abort(422, $e->getMessage());
         }
-        abort_unless(count($rolls) || isset($action['saveAbility']) || isset($action['effect']) || isset($action['resourceId']) || isset($action['documentId']), 422, 'Defina rolagem, cura, efeito ou custo antes de usar esta ação.');
-        if ($slotLevel !== null) {
-            $system['spells']['slots'][$slotLevel]['used'] = ($slot['used'] ?? 0) + 1;
-        }
-        if ($genericResource !== null) {
-            $resourceIndex = collect($system['resources'])->search(fn ($resource) => ($resource['id'] ?? null) === $action['resourceId']);
-            $system['resources'][$resourceIndex]['used'] = ($genericResource['used'] ?? 0) + (int) ($action['resourceCost'] ?? 1);
-        }
+        abort_unless(count($rolls) || isset($action['saveAbility']) || isset($action['effect']) || isset($action['spellSlotLevel'])
+            || isset($action['resourceId']) || isset($action['documentId']), 422, 'Defina rolagem, cura, efeito ou custo antes de usar esta ação.');
+        $system = ResourcePool::spend($system, $resourceCosts);
         if ($document) {
             $charges = $document->charges;
-            $charges['value'] = max(0, (int) $charges['value'] - (int) ($action['chargeCost'] ?? 1));
+            $charges['value'] -= (int) ($action['chargeCost'] ?? 1);
             $document->charges = $charges;
             $document->save();
         }
@@ -312,7 +300,7 @@ final class SceneActionController extends Controller
             'rolls' => $rolls,
             'label' => $actor->name.' · '.$action['name']
                 .($slotLevel !== null ? ' · espaço nível '.$slotLevel.' consumido' : '')
-                .($genericResource !== null ? ' · '.($action['resourceCost'] ?? 1).' '.($genericResource['name'] ?? 'recurso').' consumido' : ''),
+                .(isset($action['resourceId']) ? ' · '.($action['resourceCost'] ?? $genericResource['defaultCost'] ?? 1).' '.($genericResource['name'] ?? 'Inspiração').' consumido' : ''),
             'formula' => $result['formula'],
             'total' => $result['total'],
             'detail' => $result['detail'],
@@ -336,6 +324,7 @@ final class SceneActionController extends Controller
             'resource_after' => json_encode([
                 'slots' => $system['spells']['slots'] ?? [],
                 'resources' => $system['resources'] ?? [],
+                'inspiration' => $system['inspiration'] ?? false,
                 'concentration' => $system['concentration'] ?? null,
                 ...($document ? ['documentCharges' => ['id' => $document->id, 'charges' => $document->fresh()->charges]] : []),
             ]),
@@ -346,6 +335,10 @@ final class SceneActionController extends Controller
         $state['chat'] = array_slice($state['chat'], -200);
         $scene->state = $state;
         $scene->save();
+        if ($resourceCosts) {
+            ResourceAudit::record($actor, 'action', $beforePools, ResourceAudit::snapshot($actor, $system),
+                $user->id, $messageId, null, null, 'action:'.$action['name']);
+        }
         broadcast(new SceneUpdated($scene, 'chat'));
 
         return response()->json(['message' => $scene->messageFor($request->user(), $message), 'actor' => $actor->toPayload(), 'state' => $scene->stateFor($request->user())]);

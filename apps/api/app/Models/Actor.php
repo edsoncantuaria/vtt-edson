@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Support\Dnd\ActiveEffectEngine;
+use App\Support\Dnd\ResourceAudit;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -128,6 +129,7 @@ class Actor extends Model
                 ->filter(fn (ActiveEffect $effect) => $gm || $effect->visibility !== 'gm')
                 ->map(fn (ActiveEffect $effect) => $gm ? $effect->toArray() : Arr::except($effect->toArray(),
                     ['metadata', 'concentration_actor_id', 'concentration_id', 'source_document_id']))->values(),
+            'resourcePools' => ResourceAudit::snapshot($this, $system),
         ];
     }
 }

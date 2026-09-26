@@ -8,6 +8,8 @@ use App\Models\CampaignResourcePermission;
 use App\Models\CatalogEntry;
 use App\Support\Dnd\ActorDocumentService;
 use App\Support\Dnd\ActorSystemValidator;
+use App\Support\Dnd\ResourceAudit;
+use App\Support\Dnd\ResourcePool;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -54,11 +56,16 @@ final class ActorAdvancementController extends Controller
                 && (int) data_get($next, 'bio.level') === $target, 422, 'A evolução deve acontecer exatamente um nível por vez.');
             $class = $this->entry($actor, (int) $data['classId'], 'classes');
             $this->verifyProgression($actor, $current, $next, $class, $data, $request);
+            // The submitted snapshot must pass unchanged progression checks first;
+            // explicit class resource tables are then applied identically in preview and commit.
+            $next = ResourcePool::advance($current, $next, $campaign->ruleset);
+            $beforePools = ResourceAudit::snapshot($actor, $current);
             $diff = [
                 'level' => [(int) data_get($current, 'bio.level'), $target],
                 'hp' => [(int) data_get($current, 'hp.max'), (int) data_get($next, 'hp.max')],
                 'proficiency' => [(int) data_get($current, 'proficiencyBonus'), (int) data_get($next, 'proficiencyBonus')],
                 'slots' => [data_get($current, 'spells.slots', []), data_get($next, 'spells.slots', [])],
+                'resources' => [$current['resources'] ?? [], $next['resources'] ?? []],
             ];
             if ($data['preview'] ?? false) {
                 return response()->json(['preview' => $diff, 'next' => $next, 'revision' => $actor->revision]);
@@ -68,6 +75,8 @@ final class ActorAdvancementController extends Controller
             $documents->syncFromLegacy($actor);
             $documents->syncLegacy($actor);
             $fresh = $actor->fresh();
+            ResourceAudit::record($fresh, 'level-up', $beforePools, ResourceAudit::snapshot($fresh), $request->user()->id,
+                null, null, null, 'level:'.$target);
             $id = DB::table('actor_advancements')->insertGetId([
                 'actor_id' => $actor->id, 'user_id' => $request->user()->id,
                 'request_id' => $data['requestId'], 'request_hash' => $hash,

@@ -7,9 +7,12 @@ use App\Models\Actor;
 use App\Models\CampaignResourcePermission;
 use App\Support\Dnd\ActiveEffectEngine;
 use App\Support\Dnd\ActorDocumentService;
+use App\Support\Dnd\ResourceAudit;
+use App\Support\Dnd\ResourcePool;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 final class ActorRestController extends Controller
 {
@@ -25,19 +28,21 @@ final class ActorRestController extends Controller
             abort_unless(in_array($actor->campaign->roleFor($request->user()), ['gm', 'assistant', 'player'], true)
                 && ($actor->campaign->canManage($request->user()) || $actor->isOwnedBy($request->user())
                     || CampaignResourcePermission::permits($actor->campaign, $request->user(), 'actor', $actor->id, 'edit')), 403);
-            $data = $request->validate(['rest' => ['required', 'in:short,long']]);
+            $data = $request->validate(['rest' => ['required', 'in:short,long'], 'requestId' => ['sometimes', 'uuid']]);
             $rest = $data['rest'];
-            $system = $actor->system;
+            $requestId = $data['requestId'] ?? (string) Str::uuid();
+            $hash = hash('sha256', $rest);
+            $previous = DB::table('actor_resource_events')->where(['actor_id' => $actor->id, 'request_id' => $requestId])->first();
+            if ($previous) {
+                abort_unless($previous->event === 'rest' && hash_equals((string) $previous->request_hash, $hash), 409,
+                    'Chave de recuperação já usada em outra operação.');
 
-            foreach ($system['resources'] ?? [] as $index => $resource) {
-                if (($resource['reset'] ?? 'manual') === $rest || ($rest === 'long' && ($resource['reset'] ?? '') === 'short')) {
-                    $system['resources'][$index]['used'] = 0;
-                }
+                return response()->json(['actor' => $actor->toPayload(), 'replayed' => true]);
             }
+            $beforePools = ResourceAudit::snapshot($actor);
+            $system = $actor->system;
+            $system = ResourcePool::rest($system, $rest, $actor->campaign->ruleset);
             if ($rest === 'long') {
-                foreach ($system['spells']['slots'] ?? [] as $level => $slot) {
-                    $system['spells']['slots'][$level]['used'] = 0;
-                }
                 $system['hp']['value'] = $system['hp']['max'];
                 $system['hp']['temp'] = 0;
                 $system['deathSaves'] = ['success' => 0, 'failure' => 0];
@@ -51,6 +56,8 @@ final class ActorRestController extends Controller
             $actor->save();
             $this->effects->clearForRest($actor, $rest);
             $this->documents->resetCharges($actor, $rest);
+            ResourceAudit::record($actor, 'rest', $beforePools, ResourceAudit::snapshot($actor), $request->user()->id,
+                $requestId, $hash, null, $rest.'-rest');
 
             return response()->json(['actor' => $actor->fresh()->toPayload()]);
         });

@@ -17,6 +17,7 @@ final class ActorSystemValidator
             'system.spells.slots.*' => ['array'],
             'system.spells.slots.*.max' => ['required', 'integer', 'between:0,100'],
             'system.spells.slots.*.used' => ['required', 'integer', 'between:0,100'],
+            'system.spells.slots.*.reset' => ['sometimes', 'in:short,long,manual'],
             'system.hp.value' => ['sometimes', 'integer', 'min:0', 'max:1000000'],
             'system.hp.max' => ['sometimes', 'integer', 'min:1', 'max:1000000'],
             'system.hp.temp' => ['sometimes', 'integer', 'min:0', 'max:1000000'],
@@ -28,6 +29,19 @@ final class ActorSystemValidator
             'system.resources.*.max' => ['required', 'integer', 'between:0,100000'],
             'system.resources.*.used' => ['required', 'integer', 'between:0,100000'],
             'system.resources.*.reset' => ['sometimes', 'in:short,long,manual'],
+            'system.resources.*.kind' => ['sometimes', Rule::in(ResourcePool::KINDS)],
+            'system.resources.*.source' => ['sometimes', 'string', 'max:160'],
+            'system.resources.*.edition' => ['sometimes', 'in:5e-2014,5e-2024'],
+            'system.resources.*.defaultCost' => ['sometimes', 'integer', 'between:1,1000'],
+            'system.resources.*.recovery' => ['sometimes', 'array:short,long'],
+            'system.resources.*.recovery.short' => ['required_with:system.resources.*.recovery', 'in:none,one,full'],
+            'system.resources.*.recovery.long' => ['required_with:system.resources.*.recovery', 'in:none,one,full'],
+            'system.resources.*.scaling' => ['sometimes', 'array:className,classId,classSource,byLevel'],
+            'system.resources.*.scaling.className' => ['required_with:system.resources.*.scaling', 'string', 'max:120'],
+            'system.resources.*.scaling.classId' => ['sometimes', 'integer', 'min:1'],
+            'system.resources.*.scaling.classSource' => ['sometimes', 'string', 'max:80'],
+            'system.resources.*.scaling.byLevel' => ['required_with:system.resources.*.scaling', 'array', 'max:20'],
+            'system.resources.*.scaling.byLevel.*' => ['integer', 'between:0,100000'],
             'system.ac' => ['sometimes', 'integer', 'between:0,100'],
             'system.abilities.*.score' => ['sometimes', 'integer', 'between:1,30'],
             'system.proficiencyBonus' => ['sometimes', 'integer', 'between:0,20'],
@@ -75,7 +89,19 @@ final class ActorSystemValidator
         }
         foreach ($request->input('system.resources', []) as $resource) {
             abort_if($resource['used'] > $resource['max'], 422, 'Recursos gastos não podem exceder o máximo.');
+            abort_if(str_starts_with($resource['id'], 'slot:') || str_starts_with($resource['id'], 'document:')
+                || $resource['id'] === 'inspiration', 422, 'ID reservado para recursos integrados.');
+            $edition = $resource['edition'] ?? null;
+            $campaign = $request->route('campaign') ?? $request->route('actor')?->campaign;
+            abort_if($edition !== null && $campaign && $edition !== $campaign->ruleset, 422,
+                'A edição do recurso difere da campanha.');
+            foreach (array_keys($resource['scaling']['byLevel'] ?? []) as $level) {
+                abort_unless(preg_match('/^(?:[1-9]|1[0-9]|20)$/', (string) $level), 422,
+                    'A progressão do recurso aceita níveis de classe entre 1 e 20.');
+            }
         }
+        $ids = array_column($request->input('system.resources', []), 'id');
+        abort_unless(count($ids) === count(array_unique($ids)), 422, 'Identificadores de recursos precisam ser únicos.');
 
         $this->validateProgression($request);
         foreach ($request->input('system.actions', []) as $action) {

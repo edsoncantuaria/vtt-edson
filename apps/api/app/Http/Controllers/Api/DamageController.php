@@ -14,6 +14,7 @@ use App\Models\Scene;
 use App\Support\Dnd\ActiveEffectEngine;
 use App\Support\Dnd\CombatRules;
 use App\Support\Dnd\EffectAudit;
+use App\Support\Dnd\ResourceAudit;
 use App\Support\Dnd\VitalityCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -630,6 +631,9 @@ class DamageController extends Controller
             $after = json_decode($record->resource_after, true);
             $before = json_decode($record->resource_before, true);
             $current = ['slots' => $system['spells']['slots'] ?? [], 'resources' => $system['resources'] ?? [], 'concentration' => $system['concentration'] ?? null];
+            if (array_key_exists('inspiration', $after)) {
+                $current['inspiration'] = $system['inspiration'] ?? false;
+            }
             $chargeDocument = null;
             if (is_array($after['documentCharges'] ?? null)) {
                 $chargeDocument = ActorDocument::query()->where('actor_id', $actor->id)->lockForUpdate()->find($after['documentCharges']['id'] ?? 0);
@@ -637,8 +641,12 @@ class DamageController extends Controller
                 $current['documentCharges'] = ['id' => $chargeDocument->id, 'charges' => $chargeDocument->charges];
             }
             abort_unless($current == $after, 409, 'Os espaços, recursos ou a concentração mudaram. Ajuste a ficha manualmente.');
+            $beforePools = ResourceAudit::snapshot($actor);
             $system['spells']['slots'] = $before['slots'];
             $system['resources'] = $before['resources'] ?? [];
+            if (array_key_exists('inspiration', $before)) {
+                $system['inspiration'] = $before['inspiration'];
+            }
             $system['concentration'] = $before['concentration'];
             if ($chargeDocument && is_array($before['documentCharges']['charges'] ?? null)) {
                 $chargeDocument->charges = $before['documentCharges']['charges'];
@@ -646,6 +654,8 @@ class DamageController extends Controller
             }
             $actor->system = $system;
             $actor->save();
+            ResourceAudit::record($actor, 'undo', $beforePools, ResourceAudit::snapshot($actor), $request->user()->id,
+                null, null, null, 'action:'.$messageId);
             ActiveEffect::query()->where('metadata->actionMessageId', $messageId)->get()->each(function (ActiveEffect $effect) use ($request) {
                 EffectAudit::record($effect, 'removed', $effect->toArray(), $request->user()->id, 'action-undo');
                 $effect->delete();

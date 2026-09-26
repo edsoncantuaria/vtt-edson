@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ActiveEffectSchema, ActorActionSchema, ActorResourceSchema, ActorSystemSchema, abilityModifier, emptyActorSystem, formatModifier } from './dnd'
+import { ActiveEffectSchema, ActorActionSchema, ActorResourceSchema, ActorSchema, ActorSystemSchema, ResourcePoolSchema, abilityModifier, emptyActorSystem, formatModifier } from './dnd'
 
 describe('typed damage and optional fixed reduction', () => {
   it('retains typed components on action and character schemas without breaking legacy actions', () => {
@@ -26,6 +26,28 @@ describe('effect lifecycle contract', () => {
       concentration_actor_id: 5, concentration_id: 'cast-1' })
     expect(effect.duration.phase).toBe('start')
     expect(effect.visibility).toBe('gm')
+  })
+})
+
+describe('unified resource contract', () => {
+  it('preserves old max/used/reset with optional kind, provenance, edition, cost and recovery policy', () => {
+    const legacy = ActorResourceSchema.parse({id:'ki',name:'Ki',max:3,used:1,reset:'short'})
+    expect(legacy.used).toBe(1)
+    const pool = ActorResourceSchema.parse({ ...legacy,kind:'ki',source:'Monk · PHB',edition:'5e-2014',defaultCost:2,
+      recovery:{short:'full',long:'full'},scaling:{className:'Monk',classId:16,byLevel:{'2':4}} })
+    expect(pool.scaling?.byLevel['2']).toBe(4)
+    expect(ActorResourceSchema.safeParse({...legacy,id:'inspiration'}).success).toBe(false)
+    expect(ActorResourceSchema.safeParse({...legacy,used:4}).success).toBe(false)
+    expect(ActorResourceSchema.safeParse({...legacy,recovery:{short:'invalid',long:'full'}}).success).toBe(false)
+    expect(ActorResourceSchema.safeParse({...legacy,scaling:{className:'Monk',byLevel:{'21':22}}}).success).toBe(false)
+  })
+  it('keeps the server-owned actor projection readable across reconnect, including inspiration and item charges', () => {
+    const pool = ResourcePoolSchema.parse({ id:'inspiration',actorId:7,kind:'inspiration',name:'Inspiração',
+      current:1,max:1,used:0,source:'system.inspiration',edition:'5e-2024',defaultCost:1,
+      recovery:{short:'none',long:'none'} })
+    const actor = ActorSchema.parse({id:7,campaignId:1,ownerUserId:3,name:'Hero',type:'character',
+      system:emptyActorSystem(),documents:[],activeEffects:[],resourcePools:[pool]})
+    expect(actor.resourcePools?.[0]).toEqual(pool)
   })
 })
 

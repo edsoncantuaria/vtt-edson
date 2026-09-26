@@ -20,6 +20,7 @@ export type ActorAdvancementPreview = {
     hp: [number, number];
     proficiency: [number, number];
     slots: [ActorSystem["spells"]["slots"], ActorSystem["spells"]["slots"]];
+    resources: [ActorSystem["resources"], ActorSystem["resources"]];
   };
   revision: number;
 };

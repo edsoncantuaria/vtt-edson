@@ -182,9 +182,9 @@ final class ActorDocumentService
     {
         $actor->documents()->whereNotNull('charges')->get()->each(function (ActorDocument $document) use ($rest) {
             $charges = $document->charges ?? [];
-            if (($charges['reset'] ?? 'manual') === $rest && isset($charges['max'])) {
-                $charges['value'] = (int) $charges['max'];
-                $document->charges = $charges;
+            $next = ResourcePool::restDocument($charges, $rest);
+            if ($next !== $charges) {
+                $document->charges = $next;
                 $document->save();
             }
         });

@@ -41,7 +41,7 @@ final class CombatRules
             'damageType' => ['sometimes', Rule::in(self::DAMAGE_TYPES)],
             'concentration' => ['sometimes', 'boolean'],
             'resourceId' => ['sometimes', 'string', 'max:80'],
-            'resourceCost' => ['required_with:resourceId', 'integer', 'min:1', 'max:1000'],
+            'resourceCost' => ['sometimes', 'integer', 'min:1', 'max:1000'],
             'documentId' => ['sometimes', 'integer', 'min:1'],
             'chargeCost' => ['required_with:documentId', 'integer', 'min:1', 'max:1000'],
             'attackAbility' => ['sometimes', Rule::in([...self::ABILITIES, 'spellcasting', 'weapon'])],
