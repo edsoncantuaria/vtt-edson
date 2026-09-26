@@ -116,6 +116,7 @@ export const ChatMessageSchema = z.object({
   rolls: z.array(z.object({id:z.string().uuid().optional(),kind:z.enum(['attack','damage','heal']),formula:z.string(),total:z.number(),detail:z.string(),critical:z.boolean(),fumble:z.boolean()})).optional(),
   sourceActorId: z.number().optional(),
   targetActorIds: z.array(z.number().int().positive()).optional(),
+  targetTokenIds: z.array(z.string()).optional(),
   targetMode: z.enum(['self','single','multiple']).nullable().optional(),
   effect: z.object({trigger:z.enum(['on-use','on-hit','on-failed-save']).optional()}).passthrough().nullable().optional(),
   damageType: z.string().nullable().optional(),

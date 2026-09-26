@@ -33,6 +33,9 @@ export function TableView() {
     tool,
     panel,
     actors,
+    targetTokenIds,
+    toggleTargetToken,
+    setTargetTokenIds,
     user,
     ruleset,
     combat,
@@ -109,6 +112,8 @@ export function TableView() {
     table,
     zoom,
     selectedTokenIds,
+    targetingMode,
+    setTargetingMode,
     lastTemplate,
     preparing,
     effect,
@@ -141,12 +146,13 @@ export function TableView() {
       if (e.key === "Escape") {
         setDiceOpen(false);
         setTool("select");
+        setTargetingMode(false);
       }
       if (e.key === "?") setHelpOpen(true);
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [availableTools, setTool]);
+  }, [availableTools, setTool, setTargetingMode]);
   async function uploadMap(file: File | undefined) {
     if (!file || !sceneId) return;
     if (file.size > 10 * 1024 * 1024) {
@@ -199,7 +205,7 @@ export function TableView() {
             className="table-canvas"
             ref={host}
             role="img"
-            aria-label="Mapa tático interativo. Use o painel Cena para gerenciar tokens ou as ferramentas para navegar."
+            aria-label="Mapa tático interativo. Clique no próprio token para selecionar; Shift+clique marca ou remove alvos. No celular, ative Marcar alvos e toque nos tokens. Verde indica seu token, azul indica seleção e âmbar indica alvo."
           />
           <div className="stage-top">
             <div className="scene-chip">
@@ -307,6 +313,21 @@ export function TableView() {
             </div>
           )}
           <div className="stage-bottom">
+            {role !== "observer" && (
+              <button
+                type="button"
+                className="target-mode-button"
+                aria-pressed={targetingMode}
+                onClick={() => {
+                  setTool("select");
+                  setTargetingMode(!targetingMode);
+                }}
+                title="Toque ou clique nos tokens para marcar/remover alvos. Shift+clique funciona sem ativar o modo."
+              >
+                <Icon name="crosshair" size={16} />{" "}
+                {targetingMode ? "Marcando alvos" : "Marcar alvos"}
+              </button>
+            )}
             <div className="zoom-control">
               <button
                 className="icon-button"
@@ -338,10 +359,37 @@ export function TableView() {
             </span>
             {selectedTokenIds.length > 0 && (
               <span className="grid-info">
-                <Icon name="users" size={14} />
-                {selectedTokenIds.length} {selectedTokenIds.length === 1 ? "alvo" : "alvos"}
-                {lastTemplate ? ` · ${Math.round(lastTemplate.distanceFeet * 10) / 10} ft` : ""}
+                <Icon name="cursor" size={14} /> Token selecionado
               </span>
+            )}
+            {targetTokenIds.length > 0 && (
+              <div className="target-chips" aria-label="Alvos marcados" aria-live="polite">
+                <span>
+                  <Icon name="crosshair" size={14} /> {targetTokenIds.length}{" "}
+                  {targetTokenIds.length === 1 ? "alvo" : "alvos"}
+                  {lastTemplate ? ` · ${Math.round(lastTemplate.distanceFeet * 10) / 10} ft` : ""}
+                </span>
+                {targetTokenIds.map((tokenId) => {
+                  const token = state.tokens.find((entry) => entry.id === tokenId);
+                  return token ? (
+                    <button
+                      key={tokenId}
+                      type="button"
+                      aria-label={`Remover alvo ${token.name}`}
+                      onClick={() => toggleTargetToken(tokenId)}
+                    >
+                      {token.name} <Icon name="close" size={12} />
+                    </button>
+                  ) : null;
+                })}
+                <button
+                  type="button"
+                  onClick={() => setTargetTokenIds([])}
+                  aria-label="Limpar todos os alvos"
+                >
+                  Limpar
+                </button>
+              </div>
             )}
           </div>
           {diceOpen && (

@@ -45,9 +45,15 @@ final class SceneActionController extends Controller
         $requestId = $data['requestId'] ?? (string) Str::uuid();
         $targetActorIds = array_values(array_unique(array_map('intval', $data['targetActorIds'] ?? [])));
         sort($targetActorIds);
-        $inputHash = hash('sha256', json_encode([
-            $actor->id, $data['actionId'], $data['mode'] ?? 'normal', $targetActorIds,
-        ], JSON_THROW_ON_ERROR));
+        $targetTokenIds = array_values(array_unique($data['targetTokenIds'] ?? []));
+        sort($targetTokenIds);
+        abort_if($targetTokenIds && $targetActorIds, 422, 'Escolha os alvos por token ou por ficha, não ambos.');
+        // Keep the four-field legacy hash for retries created before token targeting.
+        $hashInput = [$actor->id, $data['actionId'], $data['mode'] ?? 'normal', $targetActorIds];
+        if ($targetTokenIds) {
+            $hashInput[] = ['targetTokenIds' => $targetTokenIds];
+        }
+        $inputHash = hash('sha256', json_encode($hashInput, JSON_THROW_ON_ERROR));
         $existing = DB::table('action_records')->where(['scene_id' => $scene->id, 'user_id' => $request->user()->id, 'request_id' => $requestId])->first();
         if ($existing) {
             abort_unless((int) $existing->actor_id === $actor->id, 409);
@@ -55,7 +61,7 @@ final class SceneActionController extends Controller
             $previousMessage = json_decode($existing->message, true, flags: JSON_THROW_ON_ERROR);
             abort_if(($previousMessage['visibility'] ?? 'public') === 'gm' && ! $scene->campaign->canManage($request->user()), 403, 'Ação reservada ao mestre.');
 
-            return response()->json(['message' => $previousMessage, 'actor' => $actor->toPayload(), 'state' => $scene->stateFor($request->user())]);
+            return response()->json(['message' => $scene->messageFor($request->user(), $previousMessage), 'actor' => $actor->toPayload(), 'state' => $scene->stateFor($request->user())]);
         }
         $action = collect($actor->system['actions'] ?? [])->firstWhere('id', $data['actionId']);
         if (! $action) {
@@ -65,6 +71,23 @@ final class SceneActionController extends Controller
         CombatRules::validateAction($action);
         $actionSnapshot = $action;
         $actionRevision = (int) $actor->revision;
+        $targetTokensByActor = [];
+        if ($targetTokenIds) {
+            // Resolve public token handles inside the locked scene. The caller never
+            // needs the private actor IDs backing visible enemy tokens.
+            $visibleTokenIds = array_column($scene->visibleTokensFor($request->user()), 'id');
+            $canonicalTokens = collect($scene->state['tokens'] ?? [])->keyBy('id');
+            foreach ($targetTokenIds as $tokenId) {
+                abort_unless(in_array($tokenId, $visibleTokenIds, true), 403, 'O token não está visível nesta cena.');
+                $token = $canonicalTokens->get($tokenId);
+                abort_unless($token && is_int($token['actorId'] ?? null), 422, 'O token selecionado não possui ficha vinculada.');
+                $targetTokensByActor[(int) $token['actorId']][] = $token;
+            }
+            abort_unless(count($targetTokensByActor) === count($targetTokenIds), 422, 'Selecione apenas uma instância por ficha vinculada.');
+            $targetActorIds = array_map('intval', array_keys($targetTokensByActor));
+            sort($targetActorIds);
+            abort_unless($scene->campaign->actors()->whereIn('id', $targetActorIds)->count() === count($targetActorIds), 422, 'Um dos alvos não pertence à campanha.');
+        }
         $targetMode = $action['target'] ?? null;
         if ($targetMode === 'self') {
             abort_unless(! $targetActorIds || $targetActorIds === [$actor->id], 422, 'Esta ação só pode mirar a própria ficha.');
@@ -74,7 +97,7 @@ final class SceneActionController extends Controller
         } elseif ($targetMode === 'multiple') {
             abort_unless(count($targetActorIds) >= 1 && count($targetActorIds) <= (int) ($action['maxTargets'] ?? 50), 422, 'Revise a quantidade de alvos desta ação.');
         }
-        if ($targetActorIds && ! $member->isGm()) {
+        if ($targetActorIds && ! $member->isGm() && ! $targetTokenIds) {
             $visibleIds = collect($scene->stateFor($request->user())['tokens'] ?? [])
                 ->pluck('actorId')->filter()->map(fn ($id) => (int) $id)->all();
             $visibleIds[] = $actor->id;
@@ -86,7 +109,8 @@ final class SceneActionController extends Controller
             abort_unless($source, 422, 'Coloque a ficha no mapa para medir o alcance.');
             $grid = max(1, (float) ($scene->state['grid']['size'] ?? 70));
             foreach ($targetActorIds as $id) {
-                $distance = $tokens->filter(fn ($token) => (int) ($token['actorId'] ?? 0) === $id)
+                $candidates = $targetTokensByActor[$id] ?? $tokens->filter(fn ($token) => (int) ($token['actorId'] ?? 0) === $id);
+                $distance = collect($candidates)
                     ->map(fn ($token) => hypot((float) $token['x'] - (float) $source['x'], (float) $token['y'] - (float) $source['y']) * 5 / $grid)->min();
                 abort_unless($distance !== null && $distance <= $action['rangeFeet'], 422, 'Um alvo está fora do alcance configurado.');
             }
@@ -231,6 +255,7 @@ final class SceneActionController extends Controller
             'save' => isset($action['saveAbility']) ? ['ability' => $action['saveAbility'], 'dc' => CombatRules::saveDc($effectiveSystem, $action) + (int) round($effects->rollModifier($activeEffects, 'spell.saveDc')), 'effect' => $action['saveEffect']] : null,
             'houseRules' => array_values(array_unique($appliedRules)),
             'targetActorIds' => $targetActorIds,
+            'targetTokenIds' => $targetTokenIds,
             'targetMode' => $targetMode,
             'effectIds' => $effectIds,
             'effect' => $actionEffect,
@@ -274,6 +299,6 @@ final class SceneActionController extends Controller
         $scene->save();
         broadcast(new SceneUpdated($scene, 'chat'));
 
-        return response()->json(['message' => $message, 'actor' => $actor->toPayload(), 'state' => $scene->stateFor($request->user())]);
+        return response()->json(['message' => $scene->messageFor($request->user(), $message), 'actor' => $actor->toPayload(), 'state' => $scene->stateFor($request->user())]);
     }
 }

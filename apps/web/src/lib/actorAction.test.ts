@@ -67,4 +67,31 @@ describe("shared actor action entrypoint", () => {
     );
     expect(send).not.toHaveBeenCalled();
   });
+
+  it("targets visible token handles without sending private enemy actor IDs and ignores targets for self actions", async () => {
+    await executeActorAction(
+      9,
+      actor(),
+      "heal",
+      "request-1",
+      "normal",
+      [],
+      ["enemy-visible", "enemy-visible"],
+    );
+    expect(send).toHaveBeenLastCalledWith(9, "/actions", {
+      actorId: 7,
+      actionId: "heal",
+      requestId: "request-1",
+      mode: "normal",
+      targetTokenIds: ["enemy-visible"],
+    });
+    await executeActorAction(9, actor(), "ward", "request-2", "normal", [], ["enemy-visible"]);
+    expect(send).toHaveBeenLastCalledWith(9, "/actions", {
+      actorId: 7,
+      actionId: "ward",
+      requestId: "request-2",
+      mode: "normal",
+      targetActorIds: [7],
+    });
+  });
 });

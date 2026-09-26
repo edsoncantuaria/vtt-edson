@@ -26,6 +26,7 @@ export function ActorSheet() {
     roomCode,
     selectedActorId,
     targetActorIds,
+    targetTokenIds,
     setSelectedActorId,
     upsertActor,
     patchState,
@@ -155,7 +156,7 @@ export function ActorSheet() {
   async function executeAction(actionId: string) {
     if (!actor || !sceneId || busy) return;
     setBusy(true);
-    const key = `${sceneId}:${actor.id}:${actionId}`;
+    const key = `${sceneId}:${actor.id}:${actionId}:${mode}:${targetTokenIds.join(",")}:${targetActorIds.join(",")}`;
     if (actionRequest.current?.key !== key)
       actionRequest.current = { key, id: crypto.randomUUID() };
     try {
@@ -171,6 +172,7 @@ export function ActorSheet() {
         actionRequest.current.id,
         mode,
         targetActorIds,
+        targetTokenIds,
       );
       const message = (result as { message?: { id?: unknown } }).message;
       await pluginRegistry.hooks.emit("action:after", {

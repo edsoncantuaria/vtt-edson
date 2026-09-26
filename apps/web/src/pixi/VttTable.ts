@@ -3,6 +3,7 @@ import type { Actor, AreaTemplate, AreaTemplateKind, SceneState, Role } from "@v
 import type { Tool } from "../store/session";
 import type { CanvasObjectKind } from "../lib/canvasObjects";
 import { publicAssetUrl } from "../lib/assets";
+import { isTargetGesture } from "../lib/targeting";
 import {
   pointInAreaTemplate,
   segmentIntersectsSegment,
@@ -25,6 +26,7 @@ export type TableCallbacks = {
   onZoom: (zoom: number) => void;
   onActorOpen: (actorId: number) => void;
   onTokenSelection: (tokenIds: string[]) => void;
+  onTokenTargetToggle: (tokenId: string) => void;
   onAreaTemplate: (template: AreaTemplate) => void;
 };
 
@@ -60,7 +62,15 @@ export class VttTable {
   state: SceneState | null = null;
   backgroundUrl: string | null = null;
   bgSprite: Sprite | null = null;
-  draggingToken: { id: string; g: Container; ox: number; oy: number } | null = null;
+  draggingToken: {
+    id: string;
+    g: Container;
+    ox: number;
+    oy: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null = null;
   draggingCanvas: { kind: CanvasObjectKind; id: string; startX: number; startY: number } | null =
     null;
   draftStart: { x: number; y: number } | null = null;
@@ -71,7 +81,11 @@ export class VttTable {
   private destroyed = false;
   private renderVersion = 0;
   private selectedTokenIds = new Set<string>();
+  private targetTokenIds = new Set<string>();
+  private targetingMode = false;
   private activeTouches = new Map<number, { x: number; y: number }>();
+  private pendingTouchTarget: { pointerId: number; tokenId: string; x: number; y: number } | null =
+    null;
   private pinchDistance = 0;
   private pinchMidpoint: { x: number; y: number } | null = null;
 
@@ -168,6 +182,19 @@ export class VttTable {
     this.role = role;
   }
 
+  setTargetingMode(active: boolean) {
+    this.targetingMode = active;
+    this.app.canvas.style.cursor = active ? "crosshair" : "";
+  }
+
+  setTargets(ids: string[]) {
+    const next = new Set(ids);
+    if (ids.length === this.targetTokenIds.size && ids.every((id) => this.targetTokenIds.has(id)))
+      return;
+    this.targetTokenIds = next;
+    if (this.state && !this.draggingToken) this.drawTokens(this.state);
+  }
+
   zoom(factor: number, x = this.app.screen.width / 2, y = this.app.screen.height / 2) {
     const old = this.world.scale.x;
     const next = Math.min(3, Math.max(0.15, old * factor));
@@ -204,6 +231,13 @@ export class VttTable {
 
   async render(state: SceneState, backgroundUrl: string | null) {
     this.state = state;
+    const visibleTokenIds = new Set(state.tokens.map((token) => token.id));
+    if ([...this.selectedTokenIds].some((id) => !visibleTokenIds.has(id))) {
+      this.selectTokens(
+        [...this.selectedTokenIds].filter((id) => visibleTokenIds.has(id)),
+        false,
+      );
+    }
     const version = ++this.renderVersion;
     if (backgroundUrl !== this.backgroundUrl) {
       let tex;
@@ -379,7 +413,11 @@ export class VttTable {
       c.y = token.y;
       c.alpha = token.detected ? 0.78 : 1;
       c.eventMode = "static";
-      c.cursor = this.canEditScene || token.ownerUserId === this.userId ? "grab" : "default";
+      c.cursor = this.targetingMode
+        ? "crosshair"
+        : this.canEditScene || token.ownerUserId === this.userId
+          ? "grab"
+          : "pointer";
       (c as Container & { tokenId?: string }).tokenId = token.id;
 
       const actor = token.actorId ? actors.find((a) => a.id === token.actorId) : undefined;
@@ -400,11 +438,21 @@ export class VttTable {
         })
         .stroke({ width: 3, color: ringColor });
       c.addChild(circle);
+      if (token.ownerUserId === this.userId) {
+        c.addChild(
+          new Graphics().circle(0, 0, radius + 4).stroke({ width: 2, color: 0x54bc89, alpha: 0.9 }),
+        );
+      }
       if (this.selectedTokenIds.has(token.id)) {
         c.addChild(
           new Graphics()
-            .circle(0, 0, radius + 6)
+            .circle(0, 0, radius + 9)
             .stroke({ width: 3, color: 0x6fc3ff, alpha: 0.95 }),
+        );
+      }
+      if (this.targetTokenIds.has(token.id)) {
+        c.addChild(
+          new Graphics().circle(0, 0, radius + 14).stroke({ width: 4, color: 0xf2a846, alpha: 1 }),
         );
       }
       const initial = new Text({
@@ -703,6 +751,7 @@ export class VttTable {
       if (e.pointerType === "touch") {
         this.activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (this.activeTouches.size >= 2) {
+          this.pendingTouchTarget = null;
           const [a, b] = [...this.activeTouches.values()];
           this.pinchDistance = Math.hypot(b.x - a.x, b.y - a.y);
           this.pinchMidpoint = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -748,13 +797,28 @@ export class VttTable {
         if (hit?.tokenId) {
           const token = this.state?.tokens.find((t) => t.id === hit.tokenId);
           if (tool === "select") {
-            const additive = e.shiftKey || e.ctrlKey || e.metaKey;
-            const next = additive
-              ? this.selectedTokenIds.has(hit.tokenId)
-                ? [...this.selectedTokenIds].filter((id) => id !== hit.tokenId)
-                : [...this.selectedTokenIds, hit.tokenId]
-              : [hit.tokenId];
-            this.selectTokens(next, false);
+            if (
+              isTargetGesture({
+                targetingMode: this.targetingMode,
+                modifier: e.shiftKey || e.ctrlKey || e.metaKey,
+                canEditScene: this.canEditScene,
+                ownToken: token?.ownerUserId === this.userId,
+              })
+            ) {
+              if (this.role === "observer") return;
+              if (e.pointerType === "touch") {
+                this.pendingTouchTarget = {
+                  pointerId: e.pointerId,
+                  tokenId: hit.tokenId,
+                  x: e.clientX,
+                  y: e.clientY,
+                };
+              } else {
+                this.callbacks.onTokenTargetToggle(hit.tokenId);
+              }
+              return;
+            }
+            this.selectTokens([hit.tokenId], false);
           }
           if (!this.canEditScene && token?.ownerUserId !== this.userId) {
             if (tool === "select" && this.state) this.drawTokens(this.state);
@@ -765,6 +829,9 @@ export class VttTable {
             g: hit,
             ox: p.x - hit.x,
             oy: p.y - hit.y,
+            startX: hit.x,
+            startY: hit.y,
+            moved: false,
           };
           return;
         }
@@ -819,6 +886,13 @@ export class VttTable {
     });
 
     canvas.addEventListener("pointermove", (e) => {
+      if (
+        this.pendingTouchTarget?.pointerId === e.pointerId &&
+        Math.hypot(e.clientX - this.pendingTouchTarget.x, e.clientY - this.pendingTouchTarget.y) >
+          10
+      ) {
+        this.pendingTouchTarget = null;
+      }
       if (e.pointerType === "touch" && this.activeTouches.has(e.pointerId)) {
         this.activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (this.activeTouches.size >= 2) {
@@ -850,6 +924,8 @@ export class VttTable {
       const p = this.worldPoint(e);
       if (this.draggingToken) {
         const s = this.snap(p.x - this.draggingToken.ox, p.y - this.draggingToken.oy);
+        if (Math.hypot(s.x - this.draggingToken.startX, s.y - this.draggingToken.startY) > 1)
+          this.draggingToken.moved = true;
         this.draggingToken.g.x = s.x;
         this.draggingToken.g.y = s.y;
         return;
@@ -901,6 +977,9 @@ export class VttTable {
     const end = (e: PointerEvent) => {
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
       const wasPinching = this.pinchDistance > 0 && this.activeTouches.size >= 2;
+      const pendingTarget =
+        this.pendingTouchTarget?.pointerId === e.pointerId ? this.pendingTouchTarget : null;
+      if (pendingTarget) this.pendingTouchTarget = null;
       if (e.pointerType === "touch") {
         this.activeTouches.delete(e.pointerId);
         if (this.activeTouches.size < 2) {
@@ -909,6 +988,11 @@ export class VttTable {
         }
         if (wasPinching) return;
       }
+      if (pendingTarget) {
+        if (Math.hypot(e.clientX - pendingTarget.x, e.clientY - pendingTarget.y) <= 10)
+          this.callbacks.onTokenTargetToggle(pendingTarget.tokenId);
+        return;
+      }
       const p = this.worldPoint(e);
       if (this.panning) {
         this.panning = false;
@@ -916,7 +1000,7 @@ export class VttTable {
       }
       if (this.draggingToken) {
         const s = this.snap(this.draggingToken.g.x, this.draggingToken.g.y);
-        this.callbacks.onTokenMove(this.draggingToken.id, s.x, s.y);
+        if (this.draggingToken.moved) this.callbacks.onTokenMove(this.draggingToken.id, s.x, s.y);
         this.draggingToken = null;
         return;
       }
@@ -982,7 +1066,6 @@ export class VttTable {
             (Math.hypot(p.x - this.draftStart.x, p.y - this.draftStart.y) /
               (this.state?.grid.size ?? 70)) *
             5;
-          this.selectTokens(tokenIds);
           this.callbacks.onAreaTemplate({
             kind,
             origin: this.draftStart,
@@ -999,6 +1082,7 @@ export class VttTable {
     };
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", (e) => {
+      if (this.pendingTouchTarget?.pointerId === e.pointerId) this.pendingTouchTarget = null;
       this.activeTouches.delete(e.pointerId);
       this.pinchDistance = 0;
       this.pinchMidpoint = null;

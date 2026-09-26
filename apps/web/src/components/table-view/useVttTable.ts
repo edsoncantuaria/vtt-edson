@@ -39,12 +39,16 @@ export function useVttTable({
   const state = useSession((session) => session.state);
   const backgroundUrl = useSession((session) => session.backgroundUrl);
   const actors = useSession((session) => session.actors);
+  const tool = useSession((session) => session.tool);
   const setSelectedActorId = useSession((session) => session.setSelectedActorId);
   const setPanel = useSession((session) => session.setPanel);
-  const setMapTargets = useSession((session) => session.setTargetActorIds);
+  const setMapTargets = useSession((session) => session.setTargetTokenIds);
+  const toggleMapTarget = useSession((session) => session.toggleTargetToken);
+  const targetTokenIds = useSession((session) => session.targetTokenIds);
 
   const [zoom, setZoom] = useState(1);
   const [selectedTokenIds, setSelectedTokenIds] = useState<string[]>([]);
+  const [targetingMode, setTargetingMode] = useState(false);
   const [lastTemplate, setLastTemplate] = useState<AreaTemplate | null>(null);
   const [preparing, setPreparing] = useState(true);
   const [effect, setEffect] = useState<{ url: string; label: string } | null>(null);
@@ -54,6 +58,7 @@ export function useVttTable({
     if (!host.current || !sceneId || !role || !userId) return;
 
     setSelectedTokenIds([]);
+    setTargetingMode(false);
     setSelectedCanvasObject(null);
     setLastTemplate(null);
     setPreparing(true);
@@ -78,17 +83,21 @@ export function useVttTable({
           if (!active) return;
           setSelectedTokenIds(tokenIds);
           const current = useSession.getState();
-          setMapTargets(
-            tokenIds.flatMap((tokenId) => {
-              const actorId = current.state.tokens.find((token) => token.id === tokenId)?.actorId;
-              return typeof actorId === "number" ? [actorId] : [];
-            }),
-          );
+          const selected = tokenIds.at(-1);
+          const actorId = current.state.tokens.find((token) => token.id === selected)?.actorId;
+          if (actorId && current.actors.some((actor) => actor.id === actorId))
+            setSelectedActorId(actorId);
+        },
+        onTokenTargetToggle: (tokenId) => {
+          if (active && role !== "observer") {
+            setLastTemplate(null);
+            toggleMapTarget(tokenId);
+          }
         },
         onAreaTemplate: (template) => {
           if (!active) return;
           setLastTemplate(template);
-          setMapTargets(template.actorIds);
+          if (role !== "observer") setMapTargets(template.tokenIds);
         },
         onTokenMove: (tokenId, x, y) => {
           void updateScene(sceneId, "/tokens", { id: tokenId, x, y })
@@ -187,6 +196,7 @@ export function useVttTable({
     userId,
     canEditScene,
     setMapTargets,
+    toggleMapTarget,
     setPanel,
     setSelectedActorId,
     onActorPanelOpen,
@@ -196,6 +206,18 @@ export function useVttTable({
   useEffect(() => {
     if (table.current?.ready) void table.current.render(state, backgroundUrl).catch(report);
   }, [state, backgroundUrl, actors, report]);
+
+  useEffect(() => {
+    table.current?.setTargets(targetTokenIds);
+  }, [targetTokenIds, state]);
+
+  useEffect(() => {
+    table.current?.setTargetingMode(targetingMode);
+  }, [targetingMode, preparing]);
+
+  useEffect(() => {
+    if (tool !== "select") setTargetingMode(false);
+  }, [tool]);
 
   useEffect(() => {
     const lastMessage = state.chat.at(-1);
@@ -210,6 +232,8 @@ export function useVttTable({
     table,
     zoom,
     selectedTokenIds,
+    targetingMode,
+    setTargetingMode,
     lastTemplate,
     preparing,
     effect,

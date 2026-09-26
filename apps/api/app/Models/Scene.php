@@ -69,8 +69,12 @@ class Scene extends Model
     {
         $state = $this->state;
         if (! $this->campaign->canManage($user)) {
-            $state['chat'] = array_values(array_filter($state['chat'] ?? [],
-                fn ($message) => ($message['visibility'] ?? 'public') !== 'gm'));
+            $readable = $this->readableActorIdsFor($user);
+            $visibleTokenIds = array_column($this->visibleTokensFor($user), 'id');
+            $state['chat'] = array_values(array_map(
+                fn ($message) => $this->messageFor($user, $message, $readable, $visibleTokenIds),
+                array_filter($state['chat'] ?? [], fn ($message) => ($message['visibility'] ?? 'public') !== 'gm'),
+            ));
         }
         if ($this->campaign->canManage($user)
             || ($this->campaign->roleFor($user) !== 'observer'
@@ -81,9 +85,7 @@ class Scene extends Model
         $geometry = SceneVisibility::doors($state, $viewers);
         $state['walls'] = $geometry['walls'];
         $state['doors'] = $geometry['doors'];
-        $grantedActorIds = CampaignResourcePermission::query()->where('campaign_id', $this->campaign_id)
-            ->where('user_id', $user->id)->where('resource_type', 'actor')->pluck('resource_id');
-        $readable = $this->campaign->actors()->where(fn ($query) => $query->where('owner_user_id', $user->id)->orWhere('shared', true)->orWhereIn('id', $grantedActorIds))->pluck('id')->all();
+        $readable = $readable ?? $this->readableActorIdsFor($user);
         $state['tokens'] = SceneVisibility::tokens($this->state, $user, $viewers);
         foreach (['drawings', 'labels', 'tiles', 'regions'] as $collection) {
             $state[$collection] = array_values(array_filter($state[$collection] ?? [], fn ($item) => ! ($item['hidden'] ?? false)));
@@ -101,6 +103,49 @@ class Scene extends Model
         unset($token);
 
         return $state;
+    }
+
+    /** Redact opaque actor IDs even in persisted public action messages. */
+    public function messageFor(User $user, array $message, ?array $readable = null, ?array $visibleTokenIds = null): array
+    {
+        if ($readable === null && $this->campaign->canManage($user)) {
+            return $message;
+        }
+        $readable ??= $this->readableActorIdsFor($user);
+        if (isset($message['sourceActorId']) && ! in_array($message['sourceActorId'], $readable, true)) {
+            unset($message['sourceActorId']);
+        }
+        if (isset($message['targetActorIds'])) {
+            $message['targetActorIds'] = array_values(array_intersect($message['targetActorIds'], $readable));
+        }
+        if (isset($message['targetTokenIds'])) {
+            $visibleTokenIds ??= array_column($this->visibleTokensFor($user), 'id');
+            $message['targetTokenIds'] = array_values(array_intersect($message['targetTokenIds'], $visibleTokenIds));
+        }
+
+        return $message;
+    }
+
+    /** Redact history in one pass instead of repeating permission/perception queries per entry. */
+    public function messagesFor(User $user, array $messages): array
+    {
+        if ($this->campaign->canManage($user)) {
+            return $messages;
+        }
+        $readable = $this->readableActorIdsFor($user);
+        $visibleTokenIds = array_column($this->visibleTokensFor($user), 'id');
+
+        return array_map(fn ($message) => $this->messageFor($user, $message, $readable, $visibleTokenIds), $messages);
+    }
+
+    /** @return int[] */
+    private function readableActorIdsFor(User $user): array
+    {
+        $granted = CampaignResourcePermission::query()->where('campaign_id', $this->campaign_id)
+            ->where('user_id', $user->id)->where('resource_type', 'actor')->pluck('resource_id');
+
+        return $this->campaign->actors()->where(fn ($query) => $query->where('owner_user_id', $user->id)
+            ->orWhere('shared', true)->orWhereIn('id', $granted))->pluck('id')->all();
     }
 
     private function perceptionViewers(User $user): array

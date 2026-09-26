@@ -12,6 +12,7 @@ export function MacroHotbar({ center }: { center: () => { x: number; y: number }
     sceneId,
     selectedActorId,
     targetActorIds,
+    targetTokenIds,
     patchState,
     setActors,
     setError,
@@ -86,7 +87,7 @@ export function MacroHotbar({ center }: { center: () => { x: number; y: number }
 
   async function playAction(actionId: string) {
     if (!sceneId || !playableActor || busy !== null || actionBusy !== null) return;
-    const key = `${sceneId}:${playableActor.id}:${actionId}:${targetActorIds.join(",")}`;
+    const key = `${sceneId}:${playableActor.id}:${actionId}:${targetTokenIds.join(",")}:${targetActorIds.join(",")}`;
     if (pendingAction.current?.key !== key)
       pendingAction.current = { key, id: crypto.randomUUID() };
     setActionBusy(actionId);
@@ -103,6 +104,7 @@ export function MacroHotbar({ center }: { center: () => { x: number; y: number }
         pendingAction.current.id,
         "normal",
         targetActorIds,
+        targetTokenIds,
       );
       pendingAction.current = null;
       await pluginRegistry.hooks.emit("action:after", {

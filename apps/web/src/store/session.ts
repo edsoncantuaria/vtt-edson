@@ -3,6 +3,7 @@ import type { Actor, Combat, Role, SceneState } from "@vtt/core";
 export { isManagerRole } from "@vtt/core";
 import { emptySceneState, SceneStateSchema, ActorSchema } from "@vtt/core";
 import { publicAssetUrl } from "../lib/assets";
+import { readableTargetActors, reconcileTargetTokens, toggleTargetToken } from "../lib/targeting";
 export type Tool =
   | "pan"
   | "select"
@@ -64,6 +65,7 @@ const sceneDefaults = () => ({
   panel: "chat" as Panel,
   actors: [] as Actor[],
   selectedActorId: null as number | null,
+  targetTokenIds: [] as string[],
   targetActorIds: [] as number[],
   combat: null as Combat | null,
   error: null as string | null,
@@ -84,6 +86,8 @@ type Session = ReturnType<typeof sceneDefaults> & {
   removeActor: (id: number) => void;
   setSelectedActorId: (id: number | null) => void;
   setTargetActorIds: (ids: number[]) => void;
+  setTargetTokenIds: (ids: string[]) => void;
+  toggleTargetToken: (id: string) => void;
   setCombat: (combat: Combat | null) => void;
   setError: (error: string | null) => void;
 };
@@ -120,16 +124,23 @@ export const useSession = create<Session>((set) => ({
       tool: "select",
       combat: null,
       selectedActorId: null,
+      targetTokenIds: [],
       targetActorIds: [],
       panel: scene.role === "player" ? "actors" : current.panel,
     })),
   patchState: (state, backgroundUrl) =>
-    set((s) => ({
-      state: SceneStateSchema.parse(state),
-      backgroundUrl: publicAssetUrl(
-        backgroundUrl !== undefined ? backgroundUrl : (state.backgroundUrl ?? s.backgroundUrl),
-      ),
-    })),
+    set((s) => {
+      const next = SceneStateSchema.parse(state);
+      const targetTokenIds = reconcileTargetTokens(next, s.targetTokenIds);
+      return {
+        state: next,
+        targetTokenIds,
+        targetActorIds: readableTargetActors(next, targetTokenIds),
+        backgroundUrl: publicAssetUrl(
+          backgroundUrl !== undefined ? backgroundUrl : (state.backgroundUrl ?? s.backgroundUrl),
+        ),
+      };
+    }),
   setTool: (tool) => set({ tool }),
   setPanel: (panel) => set({ panel }),
   setActors: (actors) => set({ actors: actors.map((actor) => ActorSchema.parse(actor)) }),
@@ -145,9 +156,27 @@ export const useSession = create<Session>((set) => ({
     set((s) => ({
       actors: s.actors.filter((a) => a.id !== id),
       selectedActorId: s.selectedActorId === id ? null : s.selectedActorId,
+      targetActorIds: s.targetActorIds.filter((target) => target !== id),
     })),
   setSelectedActorId: (selectedActorId) => set({ selectedActorId }),
-  setTargetActorIds: (ids) => set({ targetActorIds: [...new Set(ids)] }),
+  setTargetActorIds: (ids) =>
+    set((s) => {
+      const allowed = new Set(ids);
+      const targetTokenIds = s.state.tokens
+        .filter((token) => token.actorId != null && allowed.has(token.actorId))
+        .map((token) => token.id);
+      return { targetTokenIds, targetActorIds: readableTargetActors(s.state, targetTokenIds) };
+    }),
+  setTargetTokenIds: (ids) =>
+    set((s) => {
+      const targetTokenIds = reconcileTargetTokens(s.state, ids);
+      return { targetTokenIds, targetActorIds: readableTargetActors(s.state, targetTokenIds) };
+    }),
+  toggleTargetToken: (id) =>
+    set((s) => {
+      const targetTokenIds = toggleTargetToken(s.state, s.targetTokenIds, id);
+      return { targetTokenIds, targetActorIds: readableTargetActors(s.state, targetTokenIds) };
+    }),
   setCombat: (combat) => set({ combat }),
   setError: (error) => set({ error }),
 }));

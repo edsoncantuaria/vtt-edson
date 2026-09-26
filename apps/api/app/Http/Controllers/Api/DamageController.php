@@ -62,7 +62,9 @@ class DamageController extends Controller
         }
         $records = $query->orderByDesc('id')->paginate(30);
 
-        return response()->json(['messages' => collect($records->items())->map(fn ($record) => [...json_decode($record->message, true), 'undone' => (bool) $record->undone]), 'lastPage' => $records->lastPage()]);
+        $messages = collect($records->items())->map(fn ($record) => [...json_decode($record->message, true), 'undone' => (bool) $record->undone])->all();
+
+        return response()->json(['messages' => $scene->messagesFor($request->user(), $messages), 'lastPage' => $records->lastPage()]);
     }
 
     public function show(Request $request, Scene $scene, string $messageId)

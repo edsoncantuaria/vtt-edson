@@ -24,6 +24,8 @@ final class ExecuteSceneActionRequest extends FormRequest
             'requestId' => ['sometimes', 'uuid'],
             'targetActorIds' => ['sometimes', 'array', 'max:50'],
             'targetActorIds.*' => ['integer', 'distinct', Rule::exists('actors', 'id')->where('campaign_id', $campaignId)],
+            'targetTokenIds' => ['sometimes', 'array', 'max:50'],
+            'targetTokenIds.*' => ['string', 'min:1', 'max:80', 'distinct'],
         ];
     }
 }

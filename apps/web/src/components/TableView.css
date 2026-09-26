@@ -230,6 +230,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   pointer-events: none;
 }
 
@@ -295,6 +297,16 @@
   display: flex;
   gap: 7px;
   align-items: center;
+}
+.target-mode-button { min-height: 44px; pointer-events: auto; background: #171f20ed; border-color: #775b30; color: #f2c282; }
+.target-mode-button[aria-pressed="true"] { background: #594022; color: #fff0ce; border-color: #f2a846; }
+.target-chips { pointer-events: auto; display: flex; gap: 5px; align-items: center; flex-wrap: nowrap; overflow-x: auto; background: #171f20ed; padding: 4px 7px; border: 1px solid #775b30; border-radius: 8px; max-width: min(500px, 100%); }
+.target-chips > span { display: flex; gap: 5px; align-items: center; color: #f2c282; font-size: 10px; }
+.target-chips > button { padding: 6px 8px; font-size: 10px; min-height: 30px; border-color: #775b30; }
+.target-chips > button svg { display: inline-block; vertical-align: middle; }
+.table-stage:has(.target-chips) .macro-hotbar { bottom: 126px; }
+@media (max-width: 650px) {
+  .table-stage:has(.target-chips) .macro-hotbar { bottom: 190px; }
 }
 .turn-banner {
   position: absolute;
