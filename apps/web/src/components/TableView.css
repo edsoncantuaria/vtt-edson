@@ -748,6 +748,14 @@
   font-weight: 500;
   width: 100%;
 }
+.roll-result > .roll-outcome {
+  width: 100%;
+  margin: 3px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
 .chat-compose {
   border-top: 1px solid var(--border);
   padding: 14px 17px 12px;

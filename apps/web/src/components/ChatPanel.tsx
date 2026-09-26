@@ -150,6 +150,9 @@ export function ChatPanel() {
                     {m.actionKind === "spell" ? "Conjuração compartilhada" : "Ação compartilhada"}
                   </b>
                 )}
+                {m.type === "roll" && m.text && m.text !== m.detail && (
+                  <p className="roll-outcome">{m.text}</p>
+                )}
               </div>
             ) : (
               <p>{m.text}</p>
@@ -157,7 +160,9 @@ export function ChatPanel() {
             {(m.save || m.rolls?.some((roll) => roll.kind === "damage")) && (
               <DamageApplication message={m} />
             )}
-            {m.sourceActorId && <UndoAction messageId={m.id} actorId={m.sourceActorId} />}
+            {m.type === "action" && m.sourceActorId && (
+              <UndoAction messageId={m.id} actorId={m.sourceActorId} />
+            )}
           </article>
         ))}
       </div>

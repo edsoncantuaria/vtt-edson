@@ -52,6 +52,16 @@ export function AttributesTab({
           <option value="disadvantage">Desvantagem</option>
         </select>
       </label>
+      <button
+        className="sheet-initiative"
+        disabled={busy || !canEdit}
+        onClick={() =>
+          void roll(formula(abilityModifier(actor.system.abilities.dex.score)), "Iniciativa")
+        }
+      >
+        <Icon name="dice" size={16} />
+        Rolar iniciativa {formatModifier(abilityModifier(actor.system.abilities.dex.score))}
+      </button>
       <div className="ability-grid">
         {ABILITIES.map((ability) => {
           const modifier = abilityModifier(actor.system.abilities[ability].score);
@@ -418,11 +428,15 @@ export function SpellsTab({
   canEdit,
   busy,
   change,
+  executeAction,
+  onEdit,
 }: {
   actor: Actor;
   canEdit: boolean;
   busy: boolean;
   change: ChangeActor;
+  executeAction: (actionId: string) => Promise<void>;
+  onEdit: () => void;
 }) {
   const upsertActor = useSession((state) => state.upsertActor);
   const setError = useSession((state) => state.setError);
@@ -487,6 +501,15 @@ export function SpellsTab({
               (candidate.data.id === spell.id && spell.id) ||
               (candidate.slug && candidate.slug === spell.slug && candidate.name === spell.name)),
         );
+        const castAction = actor.system.actions.find(
+          (action) =>
+            action.kind === "spell" &&
+            ((document && action.documentId === document.id) ||
+              action.name.trim().toLowerCase() === spell.name.trim().toLowerCase()),
+        );
+        const slot = castAction?.spellSlotLevel
+          ? actor.system.spells.slots[String(castAction.spellSlotLevel)]
+          : null;
         return (
           <article key={spell.id}>
             <div>
@@ -494,6 +517,25 @@ export function SpellsTab({
               <small>{spell.level === 0 ? "Truque" : `${spell.level}º círculo`}</small>
             </div>
             {spell.description && <p>{spell.description}</p>}
+            {castAction ? (
+              <button
+                className="primary"
+                disabled={
+                  !canEdit ||
+                  busy ||
+                  (!!castAction.spellSlotLevel && (!slot || slot.used >= slot.max))
+                }
+                onClick={() => void executeAction(castAction.id)}
+              >
+                <Icon name="spark" size={15} /> Conjurar {spell.name}
+              </button>
+            ) : canEdit ? (
+              <button disabled={busy} onClick={onEdit}>
+                Configurar ação para conjurar
+              </button>
+            ) : (
+              <small>Esta magia ainda não tem ação de conjuração configurada.</small>
+            )}
             <button
               disabled={!canEdit || busy}
               aria-pressed={spell.prepared}

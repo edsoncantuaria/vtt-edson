@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Actor, ActorSystem } from "@vtt/core";
 import { CharacterImportSchema, buildModifierFormula } from "@vtt/core";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { rollToChat } from "../lib/roll";
 import { updateScene } from "../lib/scene";
 import { pluginRegistry } from "../lib/plugins";
@@ -28,6 +28,7 @@ export function ActorSheet() {
     targetActorIds,
     setSelectedActorId,
     upsertActor,
+    patchState,
     removeActor,
     setError,
     ruleset,
@@ -35,6 +36,7 @@ export function ActorSheet() {
   const [wizard, setWizard] = useState(false);
   const [leveling, setLeveling] = useState(false);
   const [view, setView] = useState<"quick" | "classic">("quick");
+  const [classicEditing, setClassicEditing] = useState(false);
   const [tab, setTab] = useState<ActorSheetTab>("Atributos");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -46,6 +48,7 @@ export function ActorSheet() {
   const [mode, setMode] = useState("normal");
   const [query, setQuery] = useState("");
   const actionRequest = useRef<{ key: string; id: string } | null>(null);
+  const deathSaveRequest = useRef<{ sceneId: number; actorId: number; id: string } | null>(null);
   const importer = useRef<HTMLInputElement>(null);
   const actor = actors.find((a) => a.id === selectedActorId);
   const actorId = actor?.id;
@@ -59,6 +62,8 @@ export function ActorSheet() {
     });
   useEffect(() => {
     if (actorId) void pluginRegistry.hooks.emit("actor:opened", { actorId });
+    setView("quick");
+    setClassicEditing(false);
   }, [actorId]);
   async function uploadPortrait(file: File) {
     if (!actor || busy) return;
@@ -78,12 +83,50 @@ export function ActorSheet() {
     }
   }
   async function roll(formula: string, label: string) {
-    if (!sceneId || busy) return;
+    if (!sceneId || !actor || !canEdit || busy) return;
     setBusy(true);
     try {
-      await rollToChat(sceneId, formula, label.slice(0, 80));
+      await rollToChat(sceneId, formula, `${actor.name} · ${label}`.slice(0, 80));
     } catch (e) {
       report(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function rollDeathSave() {
+    if (
+      !sceneId ||
+      !actor ||
+      !canEdit ||
+      busy ||
+      actor.type !== "character" ||
+      actor.system.hp.value !== 0
+    )
+      return;
+    setBusy(true);
+    if (
+      deathSaveRequest.current?.sceneId !== sceneId ||
+      deathSaveRequest.current?.actorId !== actor.id
+    ) {
+      deathSaveRequest.current = { sceneId, actorId: actor.id, id: crypto.randomUUID() };
+    }
+    try {
+      const result = await api<{
+        actor: Actor;
+        state: ReturnType<typeof useSession.getState>["state"];
+      }>(`/scenes/${sceneId}/actors/${actor.id}/death-save`, {
+        method: "POST",
+        body: JSON.stringify({ requestId: deathSaveRequest.current.id }),
+      });
+      upsertActor(result.actor);
+      if (useSession.getState().sceneId === sceneId) patchState(result.state);
+      deathSaveRequest.current = null;
+    } catch (error) {
+      // A timeout can happen after the server commits. Keep the same key for retry;
+      // a rejected request may be reconstructed with fresh sheet state.
+      if (error instanceof ApiError && [403, 404, 409, 422].includes(error.status))
+        deathSaveRequest.current = null;
+      report(error);
     } finally {
       setBusy(false);
     }
@@ -376,16 +419,39 @@ export function ActorSheet() {
             )}
           </div>
           <div className="segmented sheet-view">
-            <button aria-pressed={view === "quick"} onClick={() => setView("quick")}>
+            <button
+              aria-pressed={view === "quick"}
+              onClick={() => {
+                setView("quick");
+                setClassicEditing(false);
+              }}
+            >
               Modo de jogo
             </button>
-            <button aria-pressed={view === "classic"} onClick={() => setView("classic")}>
+            <button
+              aria-pressed={view === "classic"}
+              onClick={() => {
+                setView("classic");
+                setClassicEditing(false);
+              }}
+            >
               Ficha clássica
             </button>
           </div>
           {view === "classic" ? (
             actor.type === "character" ? (
-              <ClassicSheet key={actor.id} actor={actor} canEdit={!!canEdit} />
+              <>
+                {canEdit && (
+                  <button
+                    className="sheet-edit-toggle"
+                    aria-pressed={classicEditing}
+                    onClick={() => setClassicEditing((current) => !current)}
+                  >
+                    {classicEditing ? "Sair da edição clássica" : "Editar ficha clássica"}
+                  </button>
+                )}
+                <ClassicSheet key={actor.id} actor={actor} canEdit={!!canEdit && classicEditing} />
+              </>
             ) : (
               <MonsterStatBlock actor={actor} />
             )
@@ -403,6 +469,7 @@ export function ActorSheet() {
               setMode={setMode}
               formula={form}
               roll={roll}
+              rollDeathSave={rollDeathSave}
               change={change}
               executeAction={executeAction}
               onEdit={() => setEditing(true)}

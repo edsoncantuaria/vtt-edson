@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\ActiveEffectController;
 use App\Http\Controllers\Api\ActorAdvancementController;
 use App\Http\Controllers\Api\ActorController;
+use App\Http\Controllers\Api\ActorDeathSaveController;
 use App\Http\Controllers\Api\ActorDocumentController;
 use App\Http\Controllers\Api\ActorRestController;
 use App\Http\Controllers\Api\AdventureImportController;
@@ -139,6 +140,7 @@ Route::middleware(['auth:sanctum', SerializeSceneWrites::class])->group(function
     Route::post('/scenes/{scene}/canvas/pings', [SceneCanvasController::class, 'ping']);
     Route::delete('/scenes/{scene}/canvas/{kind}/{id}', [SceneCanvasController::class, 'destroy']);
     Route::post('/scenes/{scene}/chat', [SceneChatController::class, 'store']);
+    Route::post('/scenes/{scene}/actors/{actor}/death-save', [ActorDeathSaveController::class, 'store']);
     Route::get('/scenes/{scene}/private-messages', [PrivateMessageController::class, 'index']);
     Route::post('/scenes/{scene}/private-messages', [PrivateMessageController::class, 'store']);
     Route::get('/scenes/{scene}/damage/{messageId}', [DamageController::class, 'show']);

@@ -110,6 +110,15 @@
   gap: 3px;
   margin-bottom: 19px;
 }
+.sheet-edit-toggle,
+.sheet-initiative,
+.sheet-death-saves > button { min-height: 44px; }
+.sheet-edit-toggle { width: 100%; margin: 8px 0; }
+.sheet-initiative { margin: 10px 0; width: 100%; justify-content: center; }
+.sheet-death-saves { display: grid; gap: 9px; margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; }
+.sheet-death-saves > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 12px; font-size: 12px; }
+.sheet-death-saves > div span, .sheet-death-saves small { color: var(--ink-muted); font-size: 10px; }
+.sheet-death-saves > button { justify-content: center; }
 .character-back > button:first-child {
   border: 0;
   margin-right: auto;
