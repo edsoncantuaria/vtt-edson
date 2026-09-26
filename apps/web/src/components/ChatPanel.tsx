@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { isValidDiceFormula, type ChatMessage } from "@vtt/core";
+import { isManagerRole, isValidDiceFormula, type ChatMessage } from "@vtt/core";
 import { api } from "../lib/api";
 import { useSession } from "../store/session";
 import { updateScene } from "../lib/scene";
 import { DamageApplication } from "./DamageApplication";
+import { SaveBatchResolution } from "./SaveBatchResolution";
+import { HealingApplication } from "./HealingApplication";
 import { UndoAction } from "./UndoAction";
 import { Icon } from "./Icon";
 import { PrivateChat } from "./PrivateChat";
 
 export function ChatPanel() {
-  const { state, sceneId, setError, user } = useSession();
+  const { state, sceneId, setError, user, role } = useSession();
   const [history, setHistory] = useState<ChatMessage[] | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
   const [lastPage, setLastPage] = useState(1);
@@ -33,6 +35,7 @@ export function ChatPanel() {
   const [busy, setBusy] = useState(false);
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const pendingRoll = useRef<{ key: string; id: string } | null>(null);
   useEffect(() => {
     if (stick.current && log.current) log.current.scrollTop = log.current.scrollHeight;
   }, [state.chat]);
@@ -45,8 +48,16 @@ export function ChatPanel() {
       return;
     }
     setBusy(true);
+    const isRoll = message.toLowerCase().startsWith("/roll ");
+    const key = `${sceneId}:${message}`;
+    if (isRoll && pendingRoll.current?.key !== key)
+      pendingRoll.current = { key, id: crypto.randomUUID() };
     try {
-      await updateScene(sceneId, "/chat", { text: message });
+      await updateScene(sceneId, "/chat", {
+        text: message,
+        ...(isRoll ? { requestId: pendingRoll.current?.id } : {}),
+      });
+      pendingRoll.current = null;
       setText("");
       stick.current = true;
     } catch (e) {
@@ -124,40 +135,66 @@ export function ChatPanel() {
             {m.type === "roll" || m.type === "action" ? (
               <div className="roll-result">
                 <div>
-                  <span>{m.label || "Rolagem de dados"}</span>
+                  <span>{m.label || (m.type === "action" ? "Ação" : "Rolagem de dados")}</span>
+                  {m.imageUrl && (
+                    <img className="action-card-image" src={m.imageUrl} alt="" loading="lazy" />
+                  )}
                   <code>{m.formula}</code>
                   <small>{m.detail}</small>
+                  {m.rollId && (
+                    <small title={m.rollId}>ID da rolagem: {m.rollId.slice(0, 8)}</small>
+                  )}
                 </div>
                 <strong className={m.critical ? "critical" : m.fumble ? "fumble" : ""}>
-                  {m.total}
+                  {m.type === "action" && !m.rolls?.length ? "Executada" : m.total}
                 </strong>
                 {m.rolls &&
                   m.rolls.length > 1 &&
                   m.rolls.slice(1).map((roll, index) => (
                     <div key={index}>
-                      <b>Dano: {roll.total}</b>
+                      <b>
+                        {roll.kind === "heal" ? "Cura" : roll.kind === "damage" ? "Dano" : "Ataque"}
+                        : {roll.total}
+                      </b>
                       <code>{roll.formula}</code>
                       <small>{roll.detail}</small>
                     </div>
                   ))}
-                {m.critical && <b className="roll-tag">20 natural</b>}
+                {m.critical && <b className="roll-tag">20 natural · crítico</b>}
                 {m.houseRules?.length ? (
                   <small className="roll-tag">Regras da mesa: {m.houseRules.join(", ")}</small>
                 ) : null}
-                {m.fumble && <b className="roll-tag">1 natural</b>}
+                {m.fumble && <b className="roll-tag">1 natural · falha crítica</b>}
                 {m.type === "action" && (
                   <b className="roll-tag">
                     {m.actionKind === "spell" ? "Conjuração compartilhada" : "Ação compartilhada"}
                   </b>
                 )}
+                {m.type === "action" && m.actionOrigin && (
+                  <small className="roll-tag">
+                    Origem: {m.actionOrigin} · revisão da ficha {m.actionRevision ?? "legada"}
+                  </small>
+                )}
+                {m.type === "roll" && m.text && m.text !== m.detail && (
+                  <p className="roll-outcome">{m.text}</p>
+                )}
               </div>
             ) : (
               <p>{m.text}</p>
             )}
-            {(m.save || m.rolls?.some((roll) => roll.kind === "damage")) && (
+            {(m.save ||
+              m.rolls?.some((roll) => roll.kind === "damage") ||
+              (m.effect &&
+                ["on-hit", "on-failed-save"].includes(m.effect.trigger ?? "on-use"))) && (
               <DamageApplication message={m} />
             )}
-            {m.sourceActorId && <UndoAction messageId={m.id} actorId={m.sourceActorId} />}
+            {isManagerRole(role) && m.save && (m.targetActorIds?.length ?? 0) > 1 && (
+              <SaveBatchResolution message={m} />
+            )}
+            {m.rolls?.some((roll) => roll.kind === "heal") && <HealingApplication message={m} />}
+            {m.type === "action" && m.sourceActorId && (
+              <UndoAction messageId={m.id} actorId={m.sourceActorId} />
+            )}
           </article>
         ))}
       </div>
@@ -187,7 +224,7 @@ export function ChatPanel() {
             aria-label="Enviar mensagem"
             disabled={busy || !text.trim()}
           >
-            <Icon name="arrow" size={18} />
+            {busy ? "Enviando…" : <Icon name="arrow" size={18} />}
           </button>
         </div>
         <small>

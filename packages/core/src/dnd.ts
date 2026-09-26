@@ -75,7 +75,7 @@ export const InventoryItemSchema = z.object({
   documentId: z.number().int().positive().optional(),
   slug: z.string().nullable().optional(),
   name: z.string(),
-  quantity: z.number().default(1),
+  quantity: z.number().int().min(1).max(1000000).default(1),
   weight: z.number().optional(),
   equipped: z.boolean().default(false),
   description: z.string().optional(),
@@ -97,11 +97,20 @@ export const KnownSpellSchema = z.object({
 export const ActorActionSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(120),
-  kind: z.enum(['attack', 'spell']),
+  kind: z.enum(['attack', 'spell', 'feature', 'item']),
+  /** Human-authored provenance; cannot execute scripts. Legacy actions default to sheet/public. */
+  origin: z.string().max(160).optional(),
+  visibility: z.enum(['public', 'gm']).optional(),
+  imageUrl: z.string().url().refine((url) => url.startsWith('https://'), 'Use uma URL HTTPS.').optional(),
+  target: z.enum(['self', 'single', 'multiple']).optional(),
+  maxTargets: z.number().int().min(1).max(50).optional(),
+  rangeFeet: z.number().int().min(0).max(10000).optional(),
   attackFormula: z.string().optional(),
   attackAbility: z.enum(['str','dex','con','int','wis','cha','spellcasting','weapon']).optional(),
   attackBonus: z.number().int().min(-30).max(30).optional(),
   damageFormula: z.string().optional(),
+  damageParts: z.array(z.object({ formula: z.string().min(1).max(120), damageType: DamageTypeSchema })).min(1).max(8).optional(),
+  healingFormula: z.string().optional(),
   damageAbility: z.enum(['str','dex','con','int','wis','cha','spellcasting','weapon']).optional(),
   damageBonus: z.number().int().min(-30).max(30).optional(),
   spellSlotLevel: z.number().int().min(1).max(9).optional(),
@@ -136,7 +145,7 @@ export const ActorResourceSchema = z.object({
   max: z.number().int().min(0).max(100000),
   used: z.number().int().min(0).max(100000),
   reset: z.enum(['short','long','manual']).default('manual'),
-})
+}).refine((resource) => resource.used <= resource.max, { path: ['used'], message: 'O recurso gasto não pode exceder o máximo.' })
 
 export const FeatureSchema = z.object({
   id: z.string(),
@@ -197,10 +206,34 @@ export const SubclassProgressionSchema = z.object({
 })
 
 export const ActorSystemSchema = z.object({
+  origin: z.object({
+    kind: z.enum(['catalog', 'homebrew']),
+    slug: z.string(), source: z.string(), edition: z.string(),
+    contentHash: z.string().nullable().optional(),
+    version: z.string().optional(),
+  }).optional(),
   tokenImageUrl: z.string().optional(),
   concentration: z.object({id:z.string(),name:z.string()}).nullable().optional(),
   damageTraits: z.object({resist:z.array(DamageTypeSchema).default([]),immune:z.array(DamageTypeSchema).default([]),vulnerable:z.array(DamageTypeSchema).default([])}).optional(),
-  preparation: z.object({classId:z.number(),source:z.string(),edition:z.string(),tasks:z.array(z.object({text:z.string(),done:z.boolean()}))}).optional(),
+  /** Explicit optional flat damage reduction, applied once after typed defenses. */
+  damageReduction: z.number().int().min(0).max(100000).optional(),
+  preparation: z.object({
+    classId:z.number(),source:z.string(),edition:z.string(),tasks:z.array(z.object({text:z.string(),done:z.boolean()})),
+    creation: z.object({
+      raceId:z.number().int().positive(), backgroundId:z.number().int().positive(),
+      subraceId:z.number().int().positive().nullable().optional(),
+      featId:z.number().int().positive().nullable().optional(),
+      skills:z.array(z.string()).default([]),
+      languages:z.array(z.string()).default([]), tools:z.array(z.string()).default([]), originSkills:z.array(z.string()).default([]),
+      scoreMethod:z.enum(['standard','points']),
+      baseScores:z.object({ str:z.number(),dex:z.number(),con:z.number(),int:z.number(),wis:z.number(),cha:z.number() }),
+      abilityOption:z.number().int().min(0), chosenAbilities:z.array(z.enum(['str','dex','con','int','wis','cha'])),
+      bonuses:z.object({str:z.number(),dex:z.number(),con:z.number(),int:z.number(),wis:z.number(),cha:z.number()}),
+      choiceSelections:z.record(z.string(),z.array(z.string())).default({}),
+      manualEquipmentConfirmed:z.boolean().default(false),
+      exceptionReason:z.string().optional(),
+    }).optional(),
+  }).optional(),
   progression: z.object({
     classes: z.array(ClassProgressionSchema).min(1),
     subclasses: z.array(SubclassProgressionSchema).max(20).optional(),
@@ -223,7 +256,8 @@ export const ActorSystemSchema = z.object({
   proficiencies: z.string().default(''),
   spellcastingAbility: z.enum(['str','dex','con','int','wis','cha']).default('int'),
   proficiencyBonus: z.number().default(2),
-  hp: z.object({ value: z.number(), max: z.number(), temp: z.number().default(0) }),
+  hp: z.object({ value: z.number().int().min(0), max: z.number().int().min(1), temp: z.number().int().min(0).default(0) })
+    .refine((hp) => hp.value <= hp.max, { path: ['value'], message: 'PV atuais não podem exceder o máximo.' }),
   ac: z.number(),
   speed: z.number(),
   skills: z.record(z.string(), SkillSchema),
@@ -234,7 +268,8 @@ export const ActorSystemSchema = z.object({
   spells: z.object({
     slots: z.preprocess(
       (value) => Array.isArray(value) && value.length === 0 ? {} : value,
-      z.record(z.string(), z.object({ max: z.number(), used: z.number() })).default({}),
+      z.record(z.string(), z.object({ max: z.number().int().min(0).max(100), used: z.number().int().min(0).max(100) })
+        .refine((slot) => slot.used <= slot.max, { path: ['used'], message: 'Espaços gastos não podem exceder o máximo.' })).default({}),
     ),
     known: z.array(KnownSpellSchema).default([]),
   }),
@@ -301,6 +336,7 @@ export const CombatParticipantSchema = z.object({
   name: z.string(),
   imgUrl: z.string().nullable(),
   initiative: z.number().nullable(),
+  rollId: z.string().uuid().nullable().optional(),
   hidden: z.boolean(),
   sort: z.number(),
 })

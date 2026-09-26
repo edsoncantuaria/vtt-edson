@@ -9,6 +9,7 @@ use App\Models\CampaignResourcePermission;
 use App\Support\Dnd\ActorDocumentService;
 use App\Support\Dnd\ActorStateFactory;
 use App\Support\Dnd\ActorSystemValidator;
+use App\Support\Dnd\WizardCreationValidator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,7 @@ class ActorController extends Controller
     public function __construct(
         private readonly ActorSystemValidator $systemValidator,
         private readonly ActorDocumentService $documents,
+        private readonly WizardCreationValidator $wizard,
     ) {}
 
     public function index(Request $request, Campaign $campaign): JsonResponse
@@ -65,6 +67,11 @@ class ActorController extends Controller
 
         $this->systemValidator->validate($request);
         $system = $data['system'] ?? ($data['type'] === 'monster' ? ActorStateFactory::monster() : ActorStateFactory::character());
+        abort_if(! $campaign->canManage($user) && collect($system['actions'] ?? [])
+            ->contains(fn ($action) => ($action['visibility'] ?? 'public') === 'gm'), 403, 'Somente o mestre pode criar ações reservadas.');
+        if ($data['type'] === 'character') {
+            $this->wizard->validate($request, $campaign, $system);
+        }
 
         $actor = Actor::create([
             'campaign_id' => $campaign->id,
@@ -102,6 +109,16 @@ class ActorController extends Controller
             if (isset($data['system'])) {
                 abort_unless($data['revision'] === $actor->revision, 409, 'A ficha mudou. Recarregue antes de salvar para preservar as ações da mesa.');
                 $this->systemValidator->validate($request);
+                if (! $actor->campaign->canManage($request->user())) {
+                    $public = $data['system']['actions'] ?? [];
+                    abort_if(collect($public)->contains(fn ($action) => ($action['visibility'] ?? 'public') === 'gm'), 403, 'Somente o mestre pode configurar ações reservadas.');
+                    $reserved = array_values(array_filter($actor->system['actions'] ?? [], fn ($action) => ($action['visibility'] ?? 'public') === 'gm'));
+                    $reservedIds = array_column($reserved, 'id');
+                    abort_if(array_intersect($reservedIds, array_column($public, 'id')), 409, 'Há uma ação reservada com o mesmo identificador. Atualize a ficha.');
+                    $data['system']['actions'] = [...$public, ...$reserved];
+                }
+                abort_if($actor->type === 'character' && (int) data_get($data['system'], 'bio.level', 1) !== (int) data_get($actor->system, 'bio.level', 1), 422,
+                    'Use Evoluir personagem para subir de nível; a edição manual da ficha não registra evolução.');
                 $actor->system = $data['system'];
             }
             if (array_key_exists('shared', $data)) {
@@ -113,12 +130,8 @@ class ActorController extends Controller
             }
             $actor->save();
             if (isset($data['system'])) {
-                if ($actor->documents()->exists()) {
-                    $this->documents->syncLegacy($actor);
-                } else {
-                    $this->documents->syncFromLegacy($actor);
-                    $this->documents->syncLegacy($actor);
-                }
+                $this->documents->syncFromLegacy($actor);
+                $this->documents->syncLegacy($actor);
             }
 
             return response()->json(['actor' => $actor->toPayload()]);
@@ -137,10 +150,19 @@ class ActorController extends Controller
 
     public function destroy(Request $request, Actor $actor): JsonResponse
     {
-        $this->requireEditRights($request, $actor);
-        $actor->delete();
+        return DB::transaction(function () use ($request, $actor) {
+            // Token writes serialize on their scene. Acquire those same locks before
+            // checking references, so a concurrent placement cannot race deletion.
+            $scenes = $actor->campaign->scenes()->orderBy('id')->lockForUpdate()->get(['id', 'state']);
+            $actor = Actor::query()->lockForUpdate()->findOrFail($actor->id);
+            $this->requireEditRights($request, $actor);
+            $referenced = $scenes->contains(fn ($scene) => collect($scene->state['tokens'] ?? [])
+                ->contains(fn ($token) => (int) ($token['actorId'] ?? 0) === (int) $actor->id));
+            abort_if($referenced, 409, 'Remova os tokens vinculados a esta ficha das cenas antes de apagá-la.');
+            $actor->delete();
 
-        return response()->json(['ok' => true]);
+            return response()->json(['ok' => true]);
+        });
     }
 
     /** Ficha "portátil" pra export/import entre campanhas — sem ids de banco. */

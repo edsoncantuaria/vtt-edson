@@ -20,6 +20,7 @@ export function CatalogEntryCard({
   kind,
   expanded,
   role,
+  ruleset,
   campaignId,
   busy,
   canAdd,
@@ -31,6 +32,7 @@ export function CatalogEntryCard({
   kind: CatalogKind;
   expanded: boolean;
   role: Role | null;
+  ruleset: string;
   campaignId: number | null;
   busy: boolean;
   canAdd: boolean;
@@ -73,6 +75,7 @@ export function CatalogEntryCard({
             {entry.source} · {entry.edition.slice(-4)}
           </small>
           <small>{subtitle(entry, kind)}</small>
+          {entry.inCampaign && <small>Na campanha</small>}
         </span>
         <Icon name="chevron" size={15} />
       </button>
@@ -87,6 +90,12 @@ export function CatalogEntryCard({
             {entry.edition === "5e-2024" ? "2024" : "2014"}
             {entry.data.page ? ` · p. ${String(entry.data.page)}` : ""}
           </p>
+          {entry.edition !== ruleset && (
+            <p role="status" className="edition-note">
+              Este verbete é de outra edição. É possível consultá-lo, mas não adicioná-lo à campanha
+              atual.
+            </p>
+          )}
           <div className="catalog-prose">
             {referenceOnly ? (
               <FiveToolsEntries value={entry.data.raw} />

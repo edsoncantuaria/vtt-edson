@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildCharacter } from "./characterBuilder";
+import { buildCharacter } from "@vtt/core";
 import type { CatalogEntry } from "./catalog";
 function entry(raw: Record<string, unknown>, name: string): CatalogEntry {
   return {

@@ -27,6 +27,7 @@ class CombatParticipant extends Model
         'name',
         'img_path',
         'initiative',
+        'initiative_roll_id',
         'hidden',
         'sort',
     ];
@@ -59,6 +60,7 @@ class CombatParticipant extends Model
             'name' => $this->name,
             'imgUrl' => $this->img_path ? url('storage/'.$this->img_path) : null,
             'initiative' => $this->initiative,
+            'rollId' => $this->initiative_roll_id,
             'hidden' => $this->hidden,
             'sort' => $this->sort,
         ];

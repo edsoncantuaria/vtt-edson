@@ -18,7 +18,7 @@ export const TABLE_TOOLS: ToolDefinition[] = [
     label: "Selecionar",
     icon: "cursor",
     key: "V",
-    hint: "Arraste um token para mover. Clique duas vezes para abrir a ficha.",
+    hint: "Clique no seu token para selecionar; Shift+clique marca alvos. No celular, use Marcar alvos. Duplo clique abre a ficha.",
   },
   {
     id: "pan",

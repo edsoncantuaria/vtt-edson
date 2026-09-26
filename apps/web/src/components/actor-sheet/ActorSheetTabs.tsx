@@ -1,5 +1,6 @@
 import {
   ABILITY_LABELS,
+  DAMAGE_LABELS,
   SKILL_ABILITY,
   SKILL_LABELS,
   abilityModifier,
@@ -52,6 +53,16 @@ export function AttributesTab({
           <option value="disadvantage">Desvantagem</option>
         </select>
       </label>
+      <button
+        className="sheet-initiative"
+        disabled={busy || !canEdit}
+        onClick={() =>
+          void roll(formula(abilityModifier(actor.system.abilities.dex.score)), "Iniciativa")
+        }
+      >
+        <Icon name="dice" size={16} />
+        Rolar iniciativa {formatModifier(abilityModifier(actor.system.abilities.dex.score))}
+      </button>
       <div className="ability-grid">
         {ABILITIES.map((ability) => {
           const modifier = abilityModifier(actor.system.abilities[ability].score);
@@ -370,10 +381,28 @@ export function ActionsTab({
         <article key={action.id}>
           <div>
             <h4>{action.name}</h4>
+            {action.origin && <small>Origem: {action.origin}</small>}
+            {action.visibility === "gm" && <small> · Visível somente ao mestre</small>}
             <small>
               {ECONOMY_LABEL[action.economy ?? "action"]} ·{" "}
-              {action.kind === "spell" ? "Magia" : "Ataque"} ·{" "}
-              {action.attackFormula ?? action.damageFormula}
+              {action.kind === "spell"
+                ? "Magia"
+                : action.kind === "feature"
+                  ? "Habilidade"
+                  : action.kind === "item"
+                    ? "Item"
+                    : "Ataque"}{" "}
+              ·{" "}
+              {[
+                action.attackFormula,
+                action.damageFormula,
+                ...(action.damageParts ?? []).map(
+                  (part) => `${part.formula} (${DAMAGE_LABELS[part.damageType]})`,
+                ),
+                action.healingFormula,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "Efeito sem rolagem"}
             </small>
           </div>
           {action.saveAbility && (
@@ -387,6 +416,16 @@ export function ActionsTab({
             </small>
           )}
           {action.concentration && <small>Exige concentração; encerra a anterior.</small>}
+          {action.target && (
+            <small>
+              {action.target === "self"
+                ? "Alvo: próprio personagem"
+                : action.target === "single"
+                  ? "Um alvo obrigatório"
+                  : `Até ${action.maxTargets ?? 50} alvos obrigatórios`}
+              {action.rangeFeet != null ? ` · ${action.rangeFeet} pés` : ""}
+            </small>
+          )}
           {action.spellSlotLevel && (
             <small>Consome 1 espaço de nível {action.spellSlotLevel}.</small>
           )}
@@ -405,7 +444,11 @@ export function ActionsTab({
             onClick={() => void executeAction(action.id)}
           >
             <Icon name={action.kind === "spell" ? "spark" : "swords"} size={15} />
-            {action.kind === "spell" ? "Conjurar" : "Atacar"}
+            {action.kind === "spell"
+              ? "Conjurar"
+              : action.kind === "attack"
+                ? "Atacar"
+                : "Executar ação"}
           </button>
         </article>
       ))}
@@ -418,11 +461,15 @@ export function SpellsTab({
   canEdit,
   busy,
   change,
+  executeAction,
+  onEdit,
 }: {
   actor: Actor;
   canEdit: boolean;
   busy: boolean;
   change: ChangeActor;
+  executeAction: (actionId: string) => Promise<void>;
+  onEdit: () => void;
 }) {
   const upsertActor = useSession((state) => state.upsertActor);
   const setError = useSession((state) => state.setError);
@@ -487,6 +534,15 @@ export function SpellsTab({
               (candidate.data.id === spell.id && spell.id) ||
               (candidate.slug && candidate.slug === spell.slug && candidate.name === spell.name)),
         );
+        const castAction = actor.system.actions.find(
+          (action) =>
+            action.kind === "spell" &&
+            ((document && action.documentId === document.id) ||
+              action.name.trim().toLowerCase() === spell.name.trim().toLowerCase()),
+        );
+        const slot = castAction?.spellSlotLevel
+          ? actor.system.spells.slots[String(castAction.spellSlotLevel)]
+          : null;
         return (
           <article key={spell.id}>
             <div>
@@ -494,6 +550,25 @@ export function SpellsTab({
               <small>{spell.level === 0 ? "Truque" : `${spell.level}º círculo`}</small>
             </div>
             {spell.description && <p>{spell.description}</p>}
+            {castAction ? (
+              <button
+                className="primary"
+                disabled={
+                  !canEdit ||
+                  busy ||
+                  (!!castAction.spellSlotLevel && (!slot || slot.used >= slot.max))
+                }
+                onClick={() => void executeAction(castAction.id)}
+              >
+                <Icon name="spark" size={15} /> Conjurar {spell.name}
+              </button>
+            ) : canEdit ? (
+              <button disabled={busy} onClick={onEdit}>
+                Configurar ação para conjurar
+              </button>
+            ) : (
+              <small>Esta magia ainda não tem ação de conjuração configurada.</small>
+            )}
             <button
               disabled={!canEdit || busy}
               aria-pressed={spell.prepared}

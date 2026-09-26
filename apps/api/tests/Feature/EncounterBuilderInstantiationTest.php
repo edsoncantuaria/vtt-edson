@@ -70,6 +70,11 @@ class EncounterBuilderInstantiationTest extends TestCase
         $this->assertSame(7, $actors[0]->system['hp']['max']);
         $this->assertSame(15, $actors[0]->system['ac']);
         $this->assertSame('1d20+4', $actors[0]->system['actions'][0]['attackFormula']);
+        $injured = $actors[0]->system;
+        $injured['hp']['value'] = 2;
+        $actors[0]->update(['system' => $injured]);
+        $this->assertSame(2, $actors[0]->fresh()->system['hp']['value']);
+        $this->assertSame(7, $actors[1]->fresh()->system['hp']['value']);
         $tokens = $scene->fresh()->state['tokens'];
         $this->assertCount(2, $tokens);
         $this->assertNotSame([$tokens[0]['x'], $tokens[0]['y']], [$tokens[1]['x'], $tokens[1]['y']]);

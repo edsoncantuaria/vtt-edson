@@ -5,6 +5,7 @@
   "type": "object",
   "required": ["grid", "tokens", "walls", "doors", "lights", "fog", "chat"],
   "properties": {
+    "schemaVersion": { "type": "integer", "enum": [1, 2], "default": 1, "description": "Ausência indica cena legada V1; cenas novas usam V2." },
     "grid": {
       "type": "object",
       "required": ["size", "offsetX", "offsetY", "snap"],
@@ -27,8 +28,13 @@
           "y": { "type": "number" },
           "name": { "type": "string" },
           "ownerUserId": { "type": ["integer", "null"] },
+          "actorId": { "type": ["integer", "null"], "minimum": 1 },
+          "hidden": { "type": "boolean" },
+          "stealthDc": { "type": ["integer", "null"], "minimum": 1, "maximum": 40 },
+          "detected": { "type": "boolean" },
           "imageUrl": { "type": ["string", "null"] },
-          "size": { "type": "number", "default": 1 }
+          "size": { "type": "number", "exclusiveMinimum": 0, "default": 1 },
+          "appearance": { "type": "object" }
         }
       }
     },
@@ -102,7 +108,7 @@
           "id": { "type": "string" },
           "userId": { "type": "integer" },
           "userName": { "type": "string" },
-          "type": { "enum": ["text", "roll"] },
+          "type": { "enum": ["text", "roll", "action"] },
           "text": { "type": "string" },
           "formula": { "type": "string" },
           "total": { "type": "number" },

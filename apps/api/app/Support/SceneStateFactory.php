@@ -10,6 +10,7 @@ final class SceneStateFactory
     public static function empty(): array
     {
         return [
+            'schemaVersion' => 2,
             'grid' => [
                 'size' => 70,
                 'offsetX' => 0,

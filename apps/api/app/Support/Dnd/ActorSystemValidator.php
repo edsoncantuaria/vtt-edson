@@ -20,6 +20,14 @@ final class ActorSystemValidator
             'system.hp.value' => ['sometimes', 'integer', 'min:0', 'max:1000000'],
             'system.hp.max' => ['sometimes', 'integer', 'min:1', 'max:1000000'],
             'system.hp.temp' => ['sometimes', 'integer', 'min:0', 'max:1000000'],
+            'system.inventory' => ['sometimes', 'array', 'max:500'],
+            'system.inventory.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:1000000'],
+            'system.resources' => ['sometimes', 'array', 'max:100'],
+            'system.resources.*.id' => ['required', 'string', 'max:80'],
+            'system.resources.*.name' => ['required', 'string', 'max:120'],
+            'system.resources.*.max' => ['required', 'integer', 'between:0,100000'],
+            'system.resources.*.used' => ['required', 'integer', 'between:0,100000'],
+            'system.resources.*.reset' => ['sometimes', 'in:short,long,manual'],
             'system.ac' => ['sometimes', 'integer', 'between:0,100'],
             'system.abilities.*.score' => ['sometimes', 'integer', 'between:1,30'],
             'system.proficiencyBonus' => ['sometimes', 'integer', 'between:0,20'],
@@ -33,6 +41,7 @@ final class ActorSystemValidator
             'system.damageTraits' => ['sometimes', 'array:resist,immune,vulnerable'],
             'system.damageTraits.*' => ['array', 'max:13'],
             'system.damageTraits.*.*' => [Rule::in(CombatRules::DAMAGE_TYPES)],
+            'system.damageReduction' => ['sometimes', 'integer', 'between:0,100000'],
             'system.bio.level' => ['sometimes', 'integer', 'between:1,20'],
             'system.progression' => ['sometimes', 'nullable', 'array:classes,subclass,subclasses'],
             'system.progression.classes' => ['required_with:system.progression', 'array', 'min:1', 'max:20'],
@@ -56,11 +65,24 @@ final class ActorSystemValidator
             'system.progression.subclasses.*.classSource' => ['sometimes', 'string', 'max:80'],
         ]);
 
+        $hp = $request->input('system.hp');
+        if (is_array($hp) && isset($hp['value'], $hp['max'])) {
+            abort_if($hp['value'] > $hp['max'], 422, 'Os PV atuais não podem exceder os PV máximos.');
+        }
+        foreach ($request->input('system.spells.slots', []) as $slot) {
+            abort_if($slot['used'] > $slot['max'], 422, 'Espaços de magia gastos não podem exceder o máximo.');
+        }
+        foreach ($request->input('system.resources', []) as $resource) {
+            abort_if($resource['used'] > $resource['max'], 422, 'Recursos gastos não podem exceder o máximo.');
+        }
+
         $this->validateProgression($request);
         foreach ($request->input('system.actions', []) as $action) {
             abort_unless(is_array($action), 422, 'Ação inválida.');
             CombatRules::validateAction($action);
         }
+        $actionIds = array_column($request->input('system.actions', []), 'id');
+        abort_unless(count($actionIds) === count(array_unique($actionIds)), 422, 'Cada ação precisa de um identificador distinto.');
     }
 
     private function validateProgression(Request $request): void

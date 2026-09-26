@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Events\CombatUpdated;
-use App\Game\Dice\DiceRoller;
+use App\Game\Dice\RollLedger;
 use App\Http\Controllers\Concerns\AuthorizesScene;
 use App\Http\Controllers\Controller;
 use App\Models\Actor;
@@ -14,6 +14,7 @@ use App\Support\Dnd\AbilityScore;
 use App\Support\Dnd\ActiveEffectEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class CombatController extends Controller
@@ -97,13 +98,16 @@ class CombatController extends Controller
         return $this->respond($scene, $combat);
     }
 
-    public function rollInitiative(Request $request, Scene $scene, DiceRoller $dice): JsonResponse
+    public function rollInitiative(Request $request, Scene $scene, RollLedger $ledger): JsonResponse
     {
         $this->requireGm($request, $scene);
         $combat = $this->activeCombat($scene);
         if (! $combat) {
             abort(404, 'Nenhum combate ativo nesta cena.');
         }
+
+        $data = $request->validate(['requestId' => ['sometimes', 'uuid']]);
+        $requestId = $data['requestId'] ?? (string) Str::uuid();
 
         foreach ($combat->participants as $participant) {
             $dexMod = 0;
@@ -114,8 +118,14 @@ class CombatController extends Controller
                 $dexMod += (int) round($this->effects->rollModifier($participant->actor->activeEffects()->get(), 'roll.initiative'));
             }
             $formula = $dexMod === 0 ? 'd20' : sprintf('d20%+d', $dexMod);
-            $result = $dice->roll($formula);
+            $result = $ledger->roll($scene, $request->user(), [
+                'requestId' => $requestId, 'step' => 'initiative:'.$participant->id,
+                'context' => 'initiative', 'actorId' => $participant->actor_id,
+                'formula' => $formula, 'houseRules' => [], 'visibility' => 'gm',
+                'label' => 'Iniciativa · '.$participant->name,
+            ]);
             $participant->initiative = $result['total'];
+            $participant->initiative_roll_id = $result['id'];
             $participant->save();
         }
 

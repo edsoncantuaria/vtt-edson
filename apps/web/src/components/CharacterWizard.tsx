@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { ABILITY_LABELS, type Ability, type Actor } from "@vtt/core";
 import { api } from "../lib/api";
-import { useSession } from "../store/session";
+import { isManagerRole, useSession } from "../store/session";
 import type { CatalogEntry } from "../lib/catalog";
 import { preparationTasks, spellLimits, spellSelectionIssues } from "../lib/characterPreparation";
-import { buildCharacter, STANDARD_SCORES } from "../lib/characterBuilder";
+import { buildCharacter, STANDARD_SCORES } from "@vtt/core";
+import {
+  fixedOriginFeats,
+  originChoiceIssues,
+  originChoices,
+  requiresOriginFeat,
+} from "../lib/characterChoices";
 import {
   combineStartingEquipmentPlans,
+  hasStructuredStartingEquipment,
   resolveStartingEquipment,
   startingEquipmentPlan,
 } from "../lib/startingEquipment";
@@ -22,7 +29,7 @@ import type { AbilityOption, SkillChoice } from "./character-wizard/types";
 const ABILITIES = Object.keys(ABILITY_LABELS) as Ability[];
 const steps = ["Identidade", "Classe", "Origem", "Atributos", "Equipamento e magias", "Revisão"];
 export function CharacterWizard({ onClose }: { onClose: () => void }) {
-  const { ruleset, campaignId, user, upsertActor, setSelectedActorId } = useSession();
+  const { ruleset, campaignId, user, role, upsertActor, setSelectedActorId } = useSession();
   const draftKey = `vtt-character-draft:${user?.id}:${campaignId}:${ruleset}`;
   const [restored, setRestored] = useState(false);
   const [draftNotice, setDraftNotice] = useState("");
@@ -31,6 +38,12 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
   const [cls, setClass] = useState<CatalogEntry | null>(null);
   const [race, setRace] = useState<CatalogEntry | null>(null);
   const [bg, setBg] = useState<CatalogEntry | null>(null);
+  const [subrace, setSubrace] = useState<CatalogEntry | null>(null);
+  const [subraceCount, setSubraceCount] = useState<number | null>(null);
+  const [feat, setFeat] = useState<CatalogEntry | null>(null);
+  const [originSelections, setOriginSelections] = useState<Record<string, string[]>>({});
+  const [manualEquipmentConfirmed, setManualEquipmentConfirmed] = useState(false);
+  const [exceptionReason, setExceptionReason] = useState("");
   const [prepared, setPrepared] = useState<string[]>([]);
   const [equipment, setEquipment] = useState<CatalogEntry[]>([]);
   const [spells, setSpells] = useState<CatalogEntry[]>([]);
@@ -56,7 +69,7 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
       const raw = localStorage.getItem(draftKey);
       if (raw) {
         const draft = JSON.parse(raw);
-        if (draft.version === 1) {
+        if (draft.version === 1 || draft.version === 2) {
           setName(draft.name);
           setClass(draft.cls);
           setRace(draft.race);
@@ -68,9 +81,17 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
           setEquipmentSelections(draft.equipmentSelections ?? {});
           setSpells(draft.spells);
           setPrepared(draft.prepared ?? []);
+          if (draft.version === 2) {
+            setSubrace(draft.subrace ?? null);
+            setFeat(draft.feat ?? null);
+            setOriginSelections(draft.originSelections ?? {});
+            setManualEquipmentConfirmed(draft.manualEquipmentConfirmed ?? false);
+            setAbilityOption(draft.abilityOption ?? 0);
+            setChosenAbilities(draft.chosenAbilities ?? []);
+          }
           setStep(0);
           setDraftNotice(
-            "Rascunho recuperado. Revise as etapas e confirme novamente os bônus de origem.",
+            "Rascunho recuperado. Revise novamente as fontes, as escolhas e os bônus antes de confirmar.",
           );
         }
       }
@@ -86,11 +107,17 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
         localStorage.setItem(
           draftKey,
           JSON.stringify({
-            version: 1,
+            version: 2,
             name,
             cls,
             race,
             bg,
+            subrace,
+            feat,
+            originSelections,
+            manualEquipmentConfirmed,
+            abilityOption,
+            chosenAbilities,
             scores,
             scoreMethod,
             skills,
@@ -112,6 +139,12 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
     cls,
     race,
     bg,
+    subrace,
+    feat,
+    originSelections,
+    manualEquipmentConfirmed,
+    abilityOption,
+    chosenAbilities,
     scores,
     scoreMethod,
     skills,
@@ -121,6 +154,31 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
     prepared,
   ]);
   const origin = ruleset === "5e-2024" ? bg : race;
+  useEffect(() => {
+    if (!race || !campaignId || ruleset !== "5e-2014") {
+      setSubraceCount(0);
+      return;
+    }
+    setSubraceCount(null);
+    const controller = new AbortController();
+    const query = new URLSearchParams({
+      campaignId: String(campaignId),
+      edition: ruleset,
+      raceName: race.name,
+      raceSource: race.source,
+      perPage: "1",
+    });
+    void api<{ total: number }>(`/catalog/races?${query}`, { signal: controller.signal })
+      .then((result) => setSubraceCount(result.total))
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setError("Não foi possível consultar as sub-raças desta espécie.");
+      });
+    return () => controller.abort();
+  }, [campaignId, race?.id, ruleset]);
+  const originRules = useMemo(() => originChoices(race, bg, subrace), [race, bg, subrace]);
+  const originIssues = originChoiceIssues(originRules, originSelections);
+  const needsFeat = ruleset === "5e-2024" && requiresOriginFeat(bg);
   const abilityOptions = (
     Array.isArray(origin?.data.raw?.ability) ? origin.data.raw.ability : []
   ) as AbilityOption[];
@@ -141,16 +199,28 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
       (simpleChoice ? Array(simpleChoice.count ?? 1).fill(simpleChoice.amount ?? 1) : []),
     [choice?.weights, simpleChoice],
   );
-  useEffect(() => {
-    setAbilityOption(0);
-  }, [origin?.id]);
-  useEffect(() => {
-    setChosenAbilities(allowed.slice(0, weights.length) as Ability[]);
-  }, [origin?.id, abilityOption, allowed, weights.length]);
   const chosenBonus = needsChoice
     ? Object.fromEntries(chosenAbilities.map((key, index) => [key, weights[index] ?? 0]))
     : {};
-  const bonuses = { ...fixed, ...chosenBonus };
+  const subraceAbility = subrace?.data.raw.ability?.[0];
+  const subraceBonuses =
+    subraceAbility && typeof subraceAbility === "object"
+      ? Object.fromEntries(
+          ABILITIES.flatMap((key) =>
+            typeof (subraceAbility as Record<string, unknown>)[key] === "number"
+              ? [[key, (subraceAbility as Record<string, number>)[key]]]
+              : [],
+          ),
+        )
+      : {};
+  const bonuses = Object.fromEntries(
+    ABILITIES.map((key) => [
+      key,
+      (fixed[key] ?? 0) +
+        (chosenBonus[key] ?? 0) +
+        ((subraceBonuses as Partial<Record<Ability, number>>)[key] ?? 0),
+    ]),
+  ) as Record<Ability, number>;
   const skillChoice = cls?.data.raw.startingProficiencies?.skills?.find(
     (value: Record<string, unknown>) => value.choose,
   )?.choose as SkillChoice | undefined;
@@ -167,7 +237,11 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
     (chosenAbilities.length === weights.length &&
       new Set(chosenAbilities).size === weights.length &&
       chosenAbilities.every((key) => allowed.includes(key)));
-  const validSkills = !skillChoice || skills.length === skillChoice.count;
+  const validSkills =
+    !skillChoice ||
+    (skills.length === skillChoice.count &&
+      new Set(skills).size === skills.length &&
+      skills.every((skill) => skillChoice.from.includes(skill)));
   const equipmentPlan = combineStartingEquipmentPlans(
     cls ? startingEquipmentPlan(cls) : { groups: [], structured: false },
     bg ? startingEquipmentPlan(bg) : { groups: [], structured: false },
@@ -177,11 +251,65 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
     equipmentSelections,
     equipment,
   );
+  const manualReviewRequired =
+    !!cls && !!bg && (!hasStructuredStartingEquipment(cls) || !hasStructuredStartingEquipment(bg));
   const system =
     cls && race && bg ? buildCharacter(ruleset, cls, race, bg, scores, bonuses, skills) : null;
   if (system) {
+    if (subrace) {
+      system.bio.race = `${race?.name} · ${subrace.name}`;
+      system.features.push({
+        id: `subrace:${subrace.slug}`,
+        name: subrace.name,
+        source: subrace.source,
+        description: subrace.data.description,
+      });
+      if (typeof subrace.data.raw.speed === "number") system.speed = subrace.data.raw.speed;
+      if (typeof subrace.data.raw.darkvision === "number")
+        system.senses.darkvision = subrace.data.raw.darkvision;
+    }
+    const chosenLanguages = originRules
+      .filter((rule) => rule.id.endsWith("languageProficiencies"))
+      .flatMap((rule) => [...rule.fixed, ...(originSelections[rule.id] ?? [])]);
+    system.languages = [...new Set([...system.languages, ...chosenLanguages])];
+    const chosenTools = originRules
+      .filter((rule) => rule.id.endsWith("toolProficiencies"))
+      .flatMap((rule) => [...rule.fixed, ...(originSelections[rule.id] ?? [])]);
+    system.proficiencies = [
+      ...new Set([...system.proficiencies.split(", ").filter(Boolean), ...chosenTools]),
+    ].join(", ");
+    const chosenOriginSkills = originRules
+      .filter((rule) => rule.id.endsWith("skillProficiencies"))
+      .flatMap((rule) => [...rule.fixed, ...(originSelections[rule.id] ?? [])]);
+    for (const rawSkill of chosenOriginSkills) {
+      const skill = Object.keys(system.skills).find(
+        (name) => name.toLowerCase() === rawSkill.replaceAll(" ", "").toLowerCase(),
+      );
+      if (skill) system.skills[skill].proficient = true;
+    }
+    for (const name of fixedOriginFeats(bg))
+      system.features.push({ id: `origin-feat:${name}`, name, source: bg?.source });
+    if (feat)
+      system.features.push({
+        id: `origin-feat:${feat.slug}`,
+        name: feat.name,
+        source: feat.source,
+        description: feat.data.description,
+      });
     system.inventory = equipmentPlan.structured
-      ? equipmentResolution.inventory
+      ? [
+          ...equipmentResolution.inventory,
+          ...equipment.slice(equipmentResolution.manualTypes.length).map((item) => ({
+            id: item.slug,
+            slug: item.slug,
+            name: item.name,
+            quantity: 1,
+            equipped: false,
+            description: String(
+              item.data.description ?? "Equipamento inicial escolhido manualmente",
+            ),
+          })),
+        ]
       : equipment.map((item) => ({
           id: item.slug,
           slug: item.slug,
@@ -204,7 +332,29 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
     }));
   }
   const limits = cls && system ? spellLimits(cls, system) : null;
-  const tasks = cls && system ? preparationTasks(cls, system, bg) : [];
+  const tasks =
+    cls && system
+      ? [
+          ...preparationTasks(cls, system, bg).filter(
+            (task) =>
+              !(manualEquipmentConfirmed && equipment.length > 0 && task.includes("equipamento")),
+          ),
+          ...(manualReviewRequired && !manualEquipmentConfirmed
+            ? ["Confirme o equipamento inicial selecionado manualmente."]
+            : []),
+          ...originIssues,
+          ...(needsFeat && !feat ? ["Selecione o talento de origem do antecedente."] : []),
+          ...(ruleset === "5e-2014" && subraceCount === null
+            ? ["Consultando sub-raças disponíveis."]
+            : []),
+          ...(ruleset === "5e-2014" && (subraceCount ?? 0) > 0 && !subrace
+            ? ["Escolha a sub-raça disponível."]
+            : []),
+          ...(subraceAbility && typeof subraceAbility === "object" && "choose" in subraceAbility
+            ? ["O bônus opcional da sub-raça exige revisão da mesa."]
+            : []),
+        ]
+      : [];
   const spellIssues = cls && system ? spellSelectionIssues(cls, system) : [];
   if (cls)
     for (const spell of spells)
@@ -218,18 +368,43 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
       source: cls.source,
       edition: ruleset,
       tasks: tasks.map((text) => ({ text, done: false })),
+      creation: {
+        raceId: race!.id,
+        backgroundId: bg!.id,
+        subraceId: subrace?.id ?? null,
+        featId: feat?.id ?? null,
+        skills,
+        languages: originRules
+          .filter((rule) => rule.id.endsWith("languageProficiencies"))
+          .flatMap((rule) => originSelections[rule.id] ?? []),
+        tools: originRules
+          .filter((rule) => rule.id.endsWith("toolProficiencies"))
+          .flatMap((rule) => originSelections[rule.id] ?? []),
+        originSkills: originRules
+          .filter((rule) => rule.id.endsWith("skillProficiencies"))
+          .flatMap((rule) => originSelections[rule.id] ?? []),
+        scoreMethod,
+        baseScores: scores,
+        abilityOption,
+        chosenAbilities,
+        bonuses,
+        choiceSelections: originSelections,
+        manualEquipmentConfirmed,
+        ...(exceptionReason.trim() ? { exceptionReason: exceptionReason.trim() } : {}),
+      },
     };
   const equipmentValid = !equipmentPlan.structured || equipmentResolution.complete;
   const canNext = [
     !!name.trim(),
     !!cls && validSkills,
-    !!race && !!bg,
+    !!race && !!bg && (ruleset !== "5e-2014" || subraceCount !== null),
     validScores && validBonus,
-    equipmentValid && spellIssues.length === 0,
-    !!system,
+    (equipmentValid && spellIssues.length === 0) || (isManagerRole(role) && equipmentValid),
+    !!system &&
+      (tasks.length === 0 || (isManagerRole(role) && exceptionReason.trim().length >= 20)),
   ][step];
   async function finish() {
-    if (!system || !campaignId || busy) return;
+    if (!system || !campaignId || busy || !canNext) return;
     setBusy(true);
     setError("");
     try {
@@ -277,6 +452,9 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
             setSkills([]);
             setEquipment([]);
             setEquipmentSelections({});
+            setSpells([]);
+            setPrepared([]);
+            setExceptionReason("");
           }}
           onSkills={setSkills}
         />
@@ -286,8 +464,35 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
           ruleset={ruleset}
           race={race}
           background={bg}
-          onRace={setRace}
-          onBackground={setBg}
+          subrace={subrace}
+          subraceCount={subraceCount}
+          feat={feat}
+          needsFeat={needsFeat}
+          originRules={originRules}
+          originSelections={originSelections}
+          onRace={(entry) => {
+            setRace(entry);
+            setSubrace(null);
+            setOriginSelections({});
+            setAbilityOption(0);
+            setChosenAbilities([]);
+            setExceptionReason("");
+          }}
+          onBackground={(entry) => {
+            setBg(entry);
+            setFeat(null);
+            setOriginSelections({});
+            setAbilityOption(0);
+            setChosenAbilities([]);
+            setExceptionReason("");
+          }}
+          onSubrace={(entry) => {
+            setSubrace(entry);
+            setOriginSelections({});
+            setExceptionReason("");
+          }}
+          onFeat={setFeat}
+          onOriginSelections={setOriginSelections}
         />
       )}
       {step === 3 && (
@@ -301,7 +506,10 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
           validScores={validScores}
           abilityOptions={abilityOptions}
           abilityOption={abilityOption}
-          setAbilityOption={setAbilityOption}
+          setAbilityOption={(index) => {
+            setAbilityOption(index);
+            setChosenAbilities([]);
+          }}
           needsChoice={needsChoice}
           weights={weights}
           chosenAbilities={chosenAbilities}
@@ -318,6 +526,7 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
           limits={limits}
           spellIssues={spellIssues}
           equipmentPlan={equipmentPlan}
+          manualReviewRequired={manualReviewRequired}
           equipmentResolution={equipmentResolution}
           equipmentSelections={equipmentSelections}
           setEquipmentSelections={setEquipmentSelections}
@@ -331,6 +540,8 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
           setSpells={setSpells}
           prepared={prepared}
           setPrepared={setPrepared}
+          manualEquipmentConfirmed={manualEquipmentConfirmed}
+          onManualEquipmentConfirmed={setManualEquipmentConfirmed}
         />
       )}
       {step === 5 && system && (
@@ -341,6 +552,9 @@ export function CharacterWizard({ onClose }: { onClose: () => void }) {
           background={bg}
           system={system}
           tasks={tasks}
+          exceptionReason={exceptionReason}
+          canAuthorizeException={isManagerRole(role)}
+          onExceptionReason={setExceptionReason}
         />
       )}
 

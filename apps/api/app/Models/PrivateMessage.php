@@ -22,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class PrivateMessage extends Model
 {
-    protected $fillable = ['scene_id', 'sender_user_id', 'recipient_user_id', 'kind', 'text', 'formula', 'total', 'detail', 'critical', 'fumble'];
+    protected $fillable = ['scene_id', 'sender_user_id', 'recipient_user_id', 'kind', 'text', 'formula', 'total', 'detail', 'critical', 'fumble', 'roll_id'];
 
     protected function casts(): array
     {

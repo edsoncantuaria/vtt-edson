@@ -96,9 +96,15 @@ export const FogRectSchema = z.object({
 
 export const ChatMessageSchema = z.object({
   id: z.string(),
+  rollId: z.string().uuid().optional(),
+  context: z.string().optional(),
+  mode: z.enum(['normal','advantage','disadvantage']).optional(),
   userId: z.number(),
   userName: z.string(),
   type: z.enum(['text', 'roll', 'action']),
+  visibility: z.enum(['public', 'gm']).optional(),
+  actionOrigin: z.string().optional(),
+  actionRevision: z.number().int().optional(),
   text: z.string().nullable().optional(),
   formula: z.string().optional(),
   total: z.number().optional(),
@@ -107,16 +113,26 @@ export const ChatMessageSchema = z.object({
   fumble: z.boolean().optional(),
   label: z.string().nullable().optional(),
   houseRules: z.array(z.string()).optional(),
-  rolls: z.array(z.object({kind:z.enum(['attack','damage']),formula:z.string(),total:z.number(),detail:z.string(),critical:z.boolean(),fumble:z.boolean()})).optional(),
+  rolls: z.array(z.object({id:z.string().uuid().optional(),kind:z.enum(['attack','damage','heal']),formula:z.string(),total:z.number(),detail:z.string(),critical:z.boolean(),fumble:z.boolean(),damageType:z.string().nullable().optional()})).optional(),
   sourceActorId: z.number().optional(),
+  targetActorIds: z.array(z.number().int().positive()).optional(),
+  targetTokenIds: z.array(z.string()).optional(),
+  targetMode: z.enum(['self','single','multiple']).nullable().optional(),
+  effect: z.object({trigger:z.enum(['on-use','on-hit','on-failed-save']).optional()}).passthrough().nullable().optional(),
   damageType: z.string().nullable().optional(),
   save: z.object({ability:z.enum(['str','dex','con','int','wis','cha']),dc:z.number(),effect:z.enum(['half','none'])}).nullable().optional(),
-  actionKind: z.enum(['attack', 'spell']).optional(),
+  actionKind: z.enum(['attack', 'spell', 'feature', 'item']).optional(),
+  imageUrl: z.string().url().optional(),
+  economy: z.enum(['action','bonus','reaction','other']).optional(),
+  rangeFeet: z.number().nullable().optional(),
+  pipeline: z.array(z.object({kind:z.enum(['attack','damage','heal']),rollId:z.string().uuid()})).optional(),
   effectUrl: z.string().url().nullable().optional(),
   createdAt: z.string(),
 })
 
 export const SceneStateSchema = z.object({
+  // Missing version denotes an existing V1 scene; only new scenes are created as V2.
+  schemaVersion: z.union([z.literal(1), z.literal(2)]).default(1),
   preparation: z.object({entryId:z.number(),chapter:z.string(),source:z.string(),sourceHash:z.string(),reviewed:z.boolean()}).optional(),
   grid: GridSchema,
   backgroundUrl: z.string().nullable().optional(),
@@ -161,6 +177,7 @@ export type SceneState = z.infer<typeof SceneStateSchema>
 
 export function emptySceneState(): SceneState {
   return {
+    schemaVersion: 2,
     grid: { size: 70, offsetX: 0, offsetY: 0, snap: true },
     backgroundUrl: null,
     tokens: [],

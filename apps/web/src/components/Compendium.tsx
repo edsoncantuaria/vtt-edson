@@ -43,13 +43,15 @@ export function Compendium() {
   const { role, user, ruleset, actors, selectedActorId, campaignId, sceneId, upsertActor } =
     useSession();
   const [optional, setOptional] = useState(false);
-  const [kind, setKind] = useState<CatalogKind>("spells");
+  const [kind, setKind] = useState<CatalogKind>("all");
+  const [scope, setScope] = useState<"library" | "campaign" | "homebrew">("library");
   const [edition, setEdition] = useState<string>(ruleset);
   const [source, setSource] = useState("");
   const [level, setLevel] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [results, setResults] = useState<CatalogResults | null>(null);
+  const [sourceNames, setSourceNames] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<number | null>(null);
   const [expandedHomebrew, setExpandedHomebrew] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,11 +66,23 @@ export function Compendium() {
     (actor) => isManagerRole(role) || actor.ownerUserId === user?.id,
   );
   const targetIsValid = editableActors.some((actor) => actor.id === Number(target));
-  const campaignIntegrated =
-    MATERIALIZED_TOOL_KINDS.includes(kind) || CAMPAIGN_SUBSYSTEM_KINDS.includes(kind);
-  const canAdd = kind === "monsters" || campaignIntegrated ? isManagerRole(role) : targetIsValid;
-  const showAdd =
-    !REFERENCE_ONLY_KINDS.includes(kind) && (kind !== "monsters" || isManagerRole(role));
+  function canAdd(entry: CatalogEntry): boolean {
+    if (entry.edition !== ruleset) return false;
+    const campaignIntegrated =
+      MATERIALIZED_TOOL_KINDS.includes(entry.kind) || CAMPAIGN_SUBSYSTEM_KINDS.includes(entry.kind);
+    return entry.kind === "monsters" || campaignIntegrated ? isManagerRole(role) : targetIsValid;
+  }
+
+  useEffect(() => {
+    if (!campaignId) return;
+    const controller = new AbortController();
+    void api<{ sourceNames: Record<string, string> }>(`/campaigns/${campaignId}/catalog-sources`, {
+      signal: controller.signal,
+    })
+      .then((result) => setSourceNames(result.sourceNames ?? {}))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [campaignId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -80,6 +94,7 @@ export function Compendium() {
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams({
         query,
+        scope,
         campaignId: String(campaignId ?? ""),
         edition,
         source,
@@ -102,7 +117,7 @@ export function Compendium() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [kind, query, page, retry, edition, source, level, campaignId]);
+  }, [kind, query, page, retry, edition, source, level, campaignId, scope]);
 
   async function share(entry: CatalogEntry) {
     if (!campaignId || busy) return;
@@ -142,11 +157,13 @@ export function Compendium() {
     setNotice("");
     setError("");
     try {
-      if (kind === "monsters") {
+      if (entry.edition !== ruleset)
+        throw new Error("Este conteúdo pertence a outra edição das regras da campanha.");
+      if (entry.kind === "monsters") {
         await addMonster(entry);
-      } else if (MATERIALIZED_TOOL_KINDS.includes(kind)) {
+      } else if (MATERIALIZED_TOOL_KINDS.includes(entry.kind)) {
         await integrateTool(entry);
-      } else if (CAMPAIGN_SUBSYSTEM_KINDS.includes(kind)) {
+      } else if (CAMPAIGN_SUBSYSTEM_KINDS.includes(entry.kind)) {
         await integrateSubsystem(entry);
       } else {
         await addToActor(entry);
@@ -168,7 +185,24 @@ export function Compendium() {
         name: entry.name,
         system: {
           ...monsterDataToActorSystem(entry.data),
-          ...(entry.data.tokenUrl ? { tokenImageUrl: `/api/catalog-media/${entry.id}/token` } : {}),
+          origin: entry.homebrewId
+            ? {
+                kind: "homebrew",
+                slug: entry.slug,
+                source: entry.source,
+                edition: entry.edition,
+                version: entry.homebrewVersion?.toString(),
+              }
+            : {
+                kind: "catalog",
+                slug: entry.slug,
+                source: entry.source,
+                edition: entry.edition,
+                contentHash: entry.content_hash ?? null,
+              },
+          ...(entry.id > 0 && entry.data.tokenUrl
+            ? { tokenImageUrl: `/api/catalog-media/${entry.id}/token` }
+            : {}),
         },
       }),
     });
@@ -216,7 +250,11 @@ export function Compendium() {
           ? entry.data.description
           : undefined;
     const documentKind =
-      kind === "spells" ? "spell" : ["items", "magic-variants"].includes(kind) ? "item" : "feature";
+      entry.kind === "spells"
+        ? "spell"
+        : ["items", "magic-variants"].includes(entry.kind)
+          ? "item"
+          : "feature";
     const rawDamage =
       typeof entry.data.damage === "string"
         ? entry.data.damage.match(/\b\d*d\d+(?:[+-]\d+)?\b/i)?.[0]
@@ -258,8 +296,19 @@ export function Compendium() {
           : {
               kind: documentKind,
               name: entry.name,
-              source: entry.source,
-              data: customData,
+              source: entry.homebrewId ? "Homebrew" : entry.source,
+              data: {
+                ...customData,
+                origin: {
+                  kind: "homebrew",
+                  slug: entry.slug,
+                  source: entry.source,
+                  edition: entry.edition,
+                  homebrewEntryId: entry.homebrewId,
+                  packageId: entry.packageId,
+                  version: entry.homebrewVersion,
+                },
+              },
             },
       ),
     });
@@ -272,6 +321,9 @@ export function Compendium() {
     const levelValue = typeof rawLevel === "number" ? rawLevel : Number(rawLevel);
     return {
       id: -entry.homebrewId,
+      homebrewId: entry.homebrewId,
+      packageId: entry.packageId,
+      homebrewVersion: entry.version,
       slug: entry.slug,
       kind: entry.kind,
       name: entry.name,
@@ -291,6 +343,30 @@ export function Compendium() {
 
   return (
     <div className="compendium">
+      <div className="catalog-filters" role="group" aria-label="Origem dos conteúdos">
+        {(
+          [
+            ["library", "Biblioteca"],
+            ["campaign", "Na campanha"],
+            ["homebrew", "Homebrew"],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            className={scope === value ? "primary" : ""}
+            aria-pressed={scope === value}
+            onClick={() => {
+              setScope(value);
+              setPage(1);
+              setExpanded(null);
+              setExpandedHomebrew(null);
+              setSource("");
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <CatalogFilters
         optional={optional}
         kind={kind}
@@ -299,9 +375,11 @@ export function Compendium() {
         level={level}
         query={query}
         results={results}
+        sourceNames={sourceNames}
         target={target}
         editableActors={editableActors}
         showTarget={
+          kind === "all" ||
           ![
             "monsters",
             ...REFERENCE_ONLY_KINDS,
@@ -348,14 +426,28 @@ export function Compendium() {
         </div>
       )}
       <div className="compendium-results">
-        <span>{loading ? "Buscando no acervo…" : `${results?.total ?? 0} resultados`}</span>
-        <small>5etools</small>
+        <span>
+          {loading
+            ? "Buscando no acervo…"
+            : `${(results?.total ?? 0) + (results?.homebrew?.length ?? 0)} resultados`}
+        </span>
+        <small>Biblioteca · conteúdo da campanha · homebrew</small>
       </div>
       {!loading && !error && !results?.data.length && !results?.homebrew?.length && (
         <div className="panel-empty">
           <Icon name="search" size={32} />
-          <h3>Nenhuma descoberta ainda.</h3>
-          <p>Experimente outro nome ou altere os filtros de fonte e edição.</p>
+          <h3>
+            {scope === "campaign"
+              ? "Nenhum conteúdo adicionado à campanha ainda."
+              : scope === "homebrew"
+                ? "Nenhum homebrew habilitado nesta categoria."
+                : "Nenhum resultado encontrado."}
+          </h3>
+          <p>
+            {scope === "campaign"
+              ? "Use a Biblioteca para adicionar conteúdo às fichas, cenas ou ferramentas da campanha."
+              : "Experimente outro nome ou altere os filtros de fonte e edição."}
+          </p>
         </div>
       )}
 
@@ -363,12 +455,13 @@ export function Compendium() {
         <CatalogEntryCard
           key={entry.id}
           entry={entry}
-          kind={kind}
+          kind={entry.kind}
           expanded={expanded === entry.id}
           role={role}
+          ruleset={ruleset}
           campaignId={campaignId}
           busy={busy}
-          canAdd={canAdd}
+          canAdd={canAdd(entry)}
           onToggle={() => setExpanded(expanded === entry.id ? null : entry.id)}
           onShare={() => void share(entry)}
           onAdd={() => void add(entry)}
@@ -377,10 +470,8 @@ export function Compendium() {
 
       <HomebrewSection
         entries={results?.homebrew ?? []}
-        kind={kind}
         expandedId={expandedHomebrew}
         busy={busy}
-        showAdd={showAdd}
         canAdd={canAdd}
         toCatalogEntry={homebrewEntry}
         onToggle={(id) => setExpandedHomebrew(expandedHomebrew === id ? null : id)}

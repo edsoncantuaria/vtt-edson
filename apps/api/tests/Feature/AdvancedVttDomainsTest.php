@@ -37,7 +37,7 @@ class AdvancedVttDomainsTest extends TestCase
         $campaignId = $room['campaign']['id'];
         $sceneId = $room['scene']['id'];
         $item = CatalogEntry::create([
-            'slug' => hash('sha256', 'wand'), 'kind' => 'items', 'name' => 'Wand', 'source' => 'DMG',
+            'slug' => hash('sha256', 'wand'), 'kind' => 'items', 'name' => 'Wand', 'source' => 'XDMG',
             'edition' => '5e-2024', 'data' => ['format' => '5etools', 'description' => 'Wand'],
         ]);
         $sourceSystem = ActorStateFactory::character();
@@ -150,8 +150,11 @@ class AdvancedVttDomainsTest extends TestCase
                     'modifiers' => [['path' => 'roll.attack', 'mode' => 'add', 'value' => 1]], 'conditions' => []],
             ],
         ])->assertCreated()->json('macro');
-        $this->postJson('/api/campaign-macros/'.$macro['id'].'/execute', ['sceneId' => $sceneId, 'actorId' => $actor['id']])
-            ->assertOk()->assertJsonCount(1, 'messages');
+        $requestId = (string) Str::uuid();
+        $macroResult = $this->postJson('/api/campaign-macros/'.$macro['id'].'/execute', ['sceneId' => $sceneId, 'actorId' => $actor['id'], 'requestId' => $requestId])
+            ->assertOk()->assertJsonCount(1, 'messages')->json();
+        $this->assertSame($macroResult['messages'][0]['id'], $macroResult['messages'][0]['rollId']);
+        $this->assertDatabaseHas('roll_records', ['id' => $macroResult['messages'][0]['rollId'], 'scene_id' => $sceneId, 'context' => 'custom']);
         $this->assertDatabaseHas('active_effects', ['actor_id' => $actor['id'], 'name' => 'Bless']);
 
         $this->postJson('/api/campaigns/'.$campaignId.'/modules', [

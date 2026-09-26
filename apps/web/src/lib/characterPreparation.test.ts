@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { emptyActorSystem } from "@vtt/core";
 import type { CatalogEntry } from "./catalog";
 import { preparationTasks, spellLimits } from "./characterPreparation";
-import { buildCharacter } from "./characterBuilder";
+import { buildCharacter } from "@vtt/core";
 const entry = (name: string, source: string, raw: Record<string, unknown>): CatalogEntry => ({
   id: 1,
   slug: name,

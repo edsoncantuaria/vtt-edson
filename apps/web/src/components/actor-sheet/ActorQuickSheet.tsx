@@ -17,6 +17,7 @@ export function ActorQuickSheet({
   setMode,
   formula,
   roll,
+  rollDeathSave,
   change,
   executeAction,
   onEdit,
@@ -34,6 +35,7 @@ export function ActorQuickSheet({
   setMode: (mode: string) => void;
   formula: (modifier: number) => string;
   roll: (formula: string, label: string) => Promise<void>;
+  rollDeathSave: () => Promise<void>;
   change: (change: (system: ActorSystem) => void) => Promise<void>;
   executeAction: (actionId: string) => Promise<void>;
   onEdit: () => void;
@@ -124,6 +126,32 @@ export function ActorQuickSheet({
           </button>
         </div>
       )}
+      {actor.type === "character" && actor.system.hp.value === 0 && (
+        <section className="sheet-death-saves" aria-label="Salvaguardas contra morte">
+          <div>
+            <strong>Salvaguardas contra morte</strong>
+            <span>
+              Sucessos {actor.system.deathSaves.success}/3 · Falhas{" "}
+              {actor.system.deathSaves.failure}/3
+            </span>
+          </div>
+          <button
+            disabled={
+              !canEdit ||
+              busy ||
+              actor.system.deathSaves.success >= 3 ||
+              actor.system.deathSaves.failure >= 3 ||
+              actor.system.conditions.some((condition) =>
+                ["estabilizado", "morto"].includes(condition.toLowerCase()),
+              )
+            }
+            onClick={() => void rollDeathSave()}
+          >
+            <Icon name="dice" size={15} /> Rolar salvaguarda contra morte
+          </button>
+          <small>O servidor registra o d20, atualiza a ficha e publica o resultado no chat.</small>
+        </section>
+      )}
       {actor.system.preparation && (
         <details className="action-resolution">
           <summary>
@@ -209,7 +237,14 @@ export function ActorQuickSheet({
         />
       )}
       {tab === "Magias" && (
-        <SpellsTab actor={actor} canEdit={canEdit} busy={busy} change={change} />
+        <SpellsTab
+          actor={actor}
+          canEdit={canEdit}
+          busy={busy}
+          change={change}
+          executeAction={executeAction}
+          onEdit={onEdit}
+        />
       )}
       {tab === "Efeitos" && <ActorEffectsTab actor={actor} canEdit={canEdit} />}
       {tab === "História" && <StoryTab actor={actor} canEdit={canEdit} onDelete={onDelete} />}

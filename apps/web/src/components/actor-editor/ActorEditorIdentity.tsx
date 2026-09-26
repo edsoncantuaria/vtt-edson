@@ -57,17 +57,9 @@ export function EssentialsSection({
               }
             />
           </label>
-          <NumberField
-            label="Nível"
-            min={1}
-            max={20}
-            value={system.bio.level}
-            onChange={(value) =>
-              mutate((next) => {
-                next.bio.level = value;
-              })
-            }
-          />
+          <p>
+            Nível: {system.bio.level}. Para mudar, use <b>Evoluir personagem</b> na ficha.
+          </p>
         </div>
       </EditorSection>
       <EditorSection title="Vitalidade e defesa">
@@ -274,6 +266,24 @@ export function StorySection({
             </div>
           </fieldset>
         ))}
+        <label>
+          Redução fixa de dano (regra opcional explícita da ficha, aplicada uma vez por ataque após
+          defesas)
+          <input
+            type="number"
+            min={0}
+            max={100000}
+            value={system.damageReduction ?? 0}
+            onChange={(event) =>
+              mutate((next) => {
+                next.damageReduction = Math.max(
+                  0,
+                  Math.min(100000, Number(event.target.value) || 0),
+                );
+              })
+            }
+          />
+        </label>
       </details>
       <div className="editor-grid">
         <label>

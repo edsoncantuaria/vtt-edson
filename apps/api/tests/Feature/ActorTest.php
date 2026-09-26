@@ -2,13 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Models\Actor;
 use App\Models\Campaign;
 use App\Models\CatalogEntry;
 use App\Models\Scene;
 use App\Models\SceneMember;
 use App\Models\User;
+use App\Support\Dnd\ActorDocumentService;
 use App\Support\SceneStateFactory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -83,6 +86,90 @@ class ActorTest extends TestCase
         $this->assertDatabaseHas('actors', ['name' => 'Lyra', 'owner_user_id' => $player->id]);
     }
 
+    public function test_actor_state_rejects_impossible_hp_slots_resources_and_item_quantities(): void
+    {
+        $gm = User::factory()->create();
+        $player = User::factory()->create();
+        $campaign = $this->campaignWithPlayer($gm, $player);
+        Sanctum::actingAs($player);
+        $valid = $this->postJson('/api/campaigns/'.$campaign->id.'/actors', ['type' => 'character', 'name' => 'Hero'])->assertCreated()->json('actor');
+        $invalidCases = [
+            ['hp' => ['value' => 11, 'max' => 10, 'temp' => 0]],
+            ['hp' => ['value' => -1, 'max' => 10, 'temp' => 0]],
+            ['spells' => ['slots' => ['1' => ['max' => 2, 'used' => 3]], 'known' => []]],
+            ['resources' => [['id' => 'rage', 'name' => 'Rage', 'max' => 2, 'used' => 3]]],
+            ['inventory' => [['name' => 'Potion', 'quantity' => -5]]],
+        ];
+        foreach ($invalidCases as $fields) {
+            $this->patchJson('/api/actors/'.$valid['id'], [
+                'revision' => $valid['revision'], 'system' => array_replace_recursive($valid['system'], $fields),
+            ])->assertUnprocessable();
+        }
+        $this->assertSame(10, (int) Actor::findOrFail($valid['id'])->system['hp']['value']);
+    }
+
+    public function test_legacy_document_sync_preserves_two_independent_items_with_same_name(): void
+    {
+        $gm = User::factory()->create();
+        $player = User::factory()->create();
+        $campaign = $this->campaignWithPlayer($gm, $player);
+        Sanctum::actingAs($player);
+        $actorId = $this->postJson('/api/campaigns/'.$campaign->id.'/actors', ['type' => 'character', 'name' => 'Hero'])->assertCreated()->json('actor.id');
+        $actor = Actor::findOrFail($actorId);
+        $system = $actor->system;
+        $system['inventory'] = [
+            ['name' => 'Potion', 'slug' => 'potion', 'quantity' => 1],
+            ['name' => 'Potion', 'slug' => 'potion', 'quantity' => 2],
+        ];
+        $actor->system = $system;
+        $actor->save();
+        $documents = app(ActorDocumentService::class);
+        $documents->syncFromLegacy($actor);
+        $this->assertSame(2, $actor->documents()->count());
+        $documents->syncFromLegacy($actor->fresh());
+        $this->assertSame(2, $actor->documents()->count());
+        $this->assertEqualsCanonicalizing([1, 2], $actor->documents()->pluck('quantity')->all());
+    }
+
+    public function test_sheet_inventory_edit_updates_document_without_losing_its_automation(): void
+    {
+        $gm = User::factory()->create();
+        $player = User::factory()->create();
+        $campaign = $this->campaignWithPlayer($gm, $player);
+        Sanctum::actingAs($player);
+        $response = $this->postJson('/api/campaigns/'.$campaign->id.'/actors', ['type' => 'character', 'name' => 'Hero'])->assertCreated()->json('actor');
+        $actor = Actor::findOrFail($response['id']);
+        $document = $actor->documents()->create([
+            'kind' => 'item', 'name' => 'Wand', 'data' => [
+                'id' => 'wand', 'name' => 'Wand', 'automation' => ['actions' => [['name' => 'Zap', 'damageFormula' => '1d6']]],
+            ], 'quantity' => 1, 'charges' => ['value' => 2, 'max' => 2, 'reset' => 'long'],
+        ]);
+        app(ActorDocumentService::class)->syncLegacy($actor);
+        $payload = $this->getJson('/api/actors/'.$actor->id)->assertOk()->json('actor');
+        $system = $payload['system'];
+        $system['inventory'][0]['quantity'] = 3;
+        $this->patchJson('/api/actors/'.$actor->id, ['revision' => $payload['revision'], 'system' => $system])->assertOk();
+        $this->assertSame(3, $document->fresh()->quantity);
+        $this->assertSame('Zap', $document->fresh()->data['automation']['actions'][0]['name']);
+    }
+
+    public function test_action_cannot_target_an_actor_from_a_different_campaign(): void
+    {
+        $gm = User::factory()->create();
+        Sanctum::actingAs($gm);
+        $room = $this->postJson('/api/rooms', ['name' => 'First'])->assertCreated()->json();
+        $otherRoom = $this->postJson('/api/rooms', ['name' => 'Second'])->assertCreated()->json();
+        $actor = $this->postJson('/api/campaigns/'.$room['campaign']['id'].'/actors', [
+            'type' => 'character', 'name' => 'Caster',
+            'system' => ['actions' => [['id' => 'bolt', 'name' => 'Bolt', 'attackFormula' => '1d20+2']]],
+        ])->assertCreated()->json('actor');
+        $other = $this->postJson('/api/campaigns/'.$otherRoom['campaign']['id'].'/actors', ['type' => 'monster', 'name' => 'Foreign'])->assertCreated()->json('actor');
+        $this->postJson('/api/scenes/'.$room['scene']['id'].'/actions', [
+            'actorId' => $actor['id'], 'actionId' => 'bolt', 'targetActorIds' => [$other['id']],
+        ])->assertUnprocessable();
+        $this->assertSame(0, DB::table('action_records')->where('scene_id', $room['scene']['id'])->count());
+    }
+
     public function test_player_cannot_edit_another_players_character(): void
     {
         $gm = User::factory()->create();
@@ -150,10 +237,14 @@ class ActorTest extends TestCase
                 ['subclassId' => $evocation->id, 'name' => 'Evocation', 'source' => 'PHB', 'className' => 'Wizard', 'classSource' => 'PHB'],
             ],
         ];
+        $this->patchJson("/api/actors/{$actor['id']}", ['system' => $system, 'revision' => $actor['revision']])->assertUnprocessable();
+        $this->postJson("/api/campaigns/{$campaign->id}/actors", [
+            'type' => 'character', 'name' => 'Multiclasse importada', 'system' => $system,
+        ])->assertCreated()->assertJsonCount(2, 'actor.system.progression.subclasses');
 
-        $this->patchJson("/api/actors/{$actor['id']}", ['system' => $system, 'revision' => $actor['revision']])
+        $this->patchJson("/api/actors/{$actor['id']}", ['system' => $actor['system'], 'revision' => $actor['revision']])
             ->assertOk()
-            ->assertJsonCount(2, 'actor.system.progression.subclasses');
+            ->assertJsonPath('actor.system.bio.level', 1);
     }
 
     public function test_outsider_cannot_see_campaign_actors(): void

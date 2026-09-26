@@ -11,6 +11,7 @@ use App\Support\Dnd\ActiveEffectEngine;
 use App\Support\MacroExecutor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 final class CampaignMacroController extends Controller
@@ -69,12 +70,17 @@ final class CampaignMacroController extends Controller
         abort_unless($canUse, 403);
         $data = $request->validate([
             'sceneId' => ['required', 'integer', 'exists:scenes,id'], 'actorId' => ['nullable', 'integer', 'exists:actors,id'],
+            'requestId' => ['required', 'uuid'],
             'targetActorIds' => ['sometimes', 'array', 'max:50'], 'targetActorIds.*' => ['integer', 'distinct'],
             'point' => ['nullable', 'array:x,y'], 'point.x' => ['required_with:point', 'numeric'], 'point.y' => ['required_with:point', 'numeric'],
         ]);
         $scene = Scene::findOrFail($data['sceneId']);
         abort_unless((int) $scene->campaign_id === (int) $campaignMacro->campaign_id, 422, 'A cena e a macro precisam pertencer à mesma campanha.');
-        $result = $executor->execute($campaignMacro, $scene, $request->user(), $data['actorId'] ?? null, $data['targetActorIds'] ?? [], $data['point'] ?? null);
+        $result = DB::transaction(function () use ($campaignMacro, $data, $executor, $request, $scene) {
+            $scene = Scene::whereKey($scene->id)->lockForUpdate()->firstOrFail();
+
+            return $executor->execute($campaignMacro, $scene, $request->user(), $data['requestId'], $data['actorId'] ?? null, $data['targetActorIds'] ?? [], $data['point'] ?? null);
+        });
 
         return response()->json($result);
     }

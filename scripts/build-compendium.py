@@ -27,7 +27,7 @@ def read(path: pathlib.Path) -> dict[str, Any]:
 books = {r["source"]: r for r in read(root / "books.json").get("book", [])}
 
 ROOT_SPECS: dict[str, dict[str, str]] = {
-    "races.json": {"race": "races"},
+    "races.json": {"race": "races", "subrace": "races"},
     "backgrounds.json": {"background": "backgrounds"},
     "feats.json": {"feat": "feats"},
     "optionalfeatures.json": {"optionalfeature": "features"},
@@ -66,6 +66,8 @@ for filename, spec in ROOT_SPECS.items():
                 continue
             if not row.get("source") and key == "magicvariant":
                 row = {**row, "source": (row.get("inherits") or {}).get("source")}
+            if not row.get("source") and key == "subrace":
+                row = {**row, "source": row.get("raceSource")}
             if row.get("source"):
                 raw.append((kind, key, row))
 
@@ -534,6 +536,8 @@ with output.open("w") as dest:
             continue
         edition = edition_for(row, source)
         identity = "|".join(str(row.get(k, "")) for k in ("name", "source", "className", "classSource", "subclassShortName", "level", "set"))
+        if key == "subrace":
+            identity += "|" + str(row.get("raceName", "")) + "|" + str(row.get("raceSource", ""))
         slug = hashlib.sha256((key + "|" + identity).encode()).hexdigest()
         if slug in seen:
             continue

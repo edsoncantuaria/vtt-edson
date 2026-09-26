@@ -20,7 +20,14 @@ export function CatalogImage({
           : null;
   const url = variant ? `/api/catalog-media/${entry.id}/${variant}` : null;
   const [failed, setFailed] = useState<string | null>(null);
-  if (!url || failed === url) return children ?? null;
+  if (!url || failed === url) {
+    if (thumbnail) return children ?? null;
+    return (
+      <p className="edition-note">
+        Arte indisponível para este verbete; os dados e referências continuam acessíveis.
+      </p>
+    );
+  }
   const image = (
     <img
       src={url}

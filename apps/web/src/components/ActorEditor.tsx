@@ -1,4 +1,10 @@
-import { ActorSystemSchema, isValidDiceFormula, type Actor, type ActorSystem } from "@vtt/core";
+import {
+  ActorSystemSchema,
+  isManagerRole,
+  isValidDiceFormula,
+  type Actor,
+  type ActorSystem,
+} from "@vtt/core";
 import { useState, type FormEvent } from "react";
 import { api } from "../lib/api";
 import { useSession } from "../store/session";
@@ -25,7 +31,7 @@ const SECTIONS = [
 type EditorSection = (typeof SECTIONS)[number];
 
 export function ActorEditor({ actor, onClose }: { actor: Actor; onClose: () => void }) {
-  const { ruleset, upsertActor } = useSession();
+  const { ruleset, upsertActor, role } = useSession();
   const [system, setSystem] = useState(() => structuredClone(actor.system));
   const [name, setName] = useState(actor.name);
   const [section, setSection] = useState<EditorSection>("Essenciais");
@@ -65,10 +71,15 @@ export function ActorEditor({ actor, onClose }: { actor: Actor; onClose: () => v
       system.actions.some(
         (action) =>
           (action.attackFormula && !isValidDiceFormula(action.attackFormula)) ||
-          (action.damageFormula && !isValidDiceFormula(action.damageFormula)),
+          (action.damageFormula && !isValidDiceFormula(action.damageFormula)) ||
+          (action.healingFormula && !isValidDiceFormula(action.healingFormula)),
       )
     ) {
       setError("Use fórmulas válidas nas ações, como 1d20+7 ou 8d6.");
+      return;
+    }
+    if (new Set(system.actions.map((action) => action.id)).size !== system.actions.length) {
+      setError("Ações duplicadas precisam de IDs independentes. Duplique novamente pelo editor.");
       return;
     }
 
@@ -139,7 +150,12 @@ export function ActorEditor({ actor, onClose }: { actor: Actor; onClose: () => v
             </>
           )}
           {section === "Ações" && (
-            <ActionsSection system={system} documents={actor.documents} mutate={mutate} />
+            <ActionsSection
+              system={system}
+              documents={actor.documents}
+              mutate={mutate}
+              canManage={isManagerRole(role)}
+            />
           )}
           {section === "Características" && (
             <ActorDocumentManager actorId={actor.id} kind="feature" />

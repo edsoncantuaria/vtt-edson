@@ -4,21 +4,17 @@ import { CatalogDetailValue } from "./CatalogDetail";
 
 export function HomebrewSection({
   entries,
-  kind,
   expandedId,
   busy,
-  showAdd,
   canAdd,
   toCatalogEntry,
   onToggle,
   onAdd,
 }: {
   entries: HomebrewCatalogEntry[];
-  kind: CatalogKind;
   expandedId: number | null;
   busy: boolean;
-  showAdd: boolean;
-  canAdd: boolean;
+  canAdd: (entry: CatalogEntry) => boolean;
   toCatalogEntry: (entry: HomebrewCatalogEntry) => CatalogEntry;
   onToggle: (id: number) => void;
   onAdd: (entry: CatalogEntry) => void;
@@ -43,7 +39,13 @@ export function HomebrewSection({
             >
               <span className="entry-icon">
                 <Icon
-                  name={kind === "spells" ? "spark" : kind === "items" ? "shield" : "swords"}
+                  name={
+                    homebrew.kind === "spells"
+                      ? "spark"
+                      : homebrew.kind === "items"
+                        ? "shield"
+                        : "swords"
+                  }
                   size={20}
                 />
               </span>
@@ -72,14 +74,23 @@ export function HomebrewSection({
                   <summary>Dados e referências</summary>
                   <CatalogDetailValue value={entry.data} />
                 </details>
-                {showAdd && !(["books", "adventures"] as CatalogKind[]).includes(kind) && (
+                {(
+                  [
+                    "spells",
+                    "items",
+                    "magic-variants",
+                    "features",
+                    "feats",
+                    "monsters",
+                  ] as CatalogKind[]
+                ).includes(homebrew.kind) && (
                   <button
                     className="primary"
-                    disabled={busy || !canAdd}
+                    disabled={busy || !canAdd(entry)}
                     onClick={() => onAdd(entry)}
                   >
                     <Icon name="plus" size={15} />
-                    {kind === "monsters" ? "Adicionar à cena" : "Adicionar à ficha"}
+                    {homebrew.kind === "monsters" ? "Adicionar à cena" : "Adicionar à ficha"}
                   </button>
                 )}
               </div>

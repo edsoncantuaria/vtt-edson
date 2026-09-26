@@ -94,6 +94,10 @@ class Actor extends Model
     public function toPayload(): array
     {
         $system = $this->system;
+        $viewer = auth()->user();
+        if ($viewer && ! $this->campaign->canManage($viewer)) {
+            $system['actions'] = array_values(array_filter($system['actions'] ?? [], fn ($action) => ($action['visibility'] ?? 'public') !== 'gm'));
+        }
         // Spell levels form a JSON dictionary, including when no slots exist.
         $system['spells']['slots'] = (object) ($system['spells']['slots'] ?? []);
 

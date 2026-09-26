@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { SceneStateSchema } from './types'
+import { emptySceneState, SceneStateSchema } from './types'
 
 describe('scene perception state', () => {
+  it('supports V1 payloads without rewriting them and starts new scenes in V2', () => {
+    const { schemaVersion: _version, ...legacy } = emptySceneState()
+    const current = SceneStateSchema.parse(legacy)
+    expect(current.schemaVersion).toBe(1)
+    expect(emptySceneState().schemaVersion).toBe(2)
+    expect(SceneStateSchema.parse({ ...current, schemaVersion: 2 }).schemaVersion).toBe(2)
+    expect(SceneStateSchema.safeParse({ ...current, schemaVersion: 3 }).success).toBe(false)
+  })
   it('defaults legacy scene vision without weakening new perception fields', () => {
     const state = SceneStateSchema.parse({
       grid: { size: 70, offsetX: 0, offsetY: 0, snap: true },

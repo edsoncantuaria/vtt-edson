@@ -10,6 +10,8 @@ use App\Models\User;
 use App\Support\Dnd\ActorStateFactory;
 use App\Support\SceneStateFactory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -59,13 +61,18 @@ class CombatTest extends TestCase
             'name' => 'Goblin',
         ])->assertOk();
 
-        $res = $this->postJson("/api/scenes/{$scene->id}/combat/roll-initiative");
+        $rollRequest = ['requestId' => (string) Str::uuid()];
+        $res = $this->postJson("/api/scenes/{$scene->id}/combat/roll-initiative", $rollRequest);
         $res->assertOk();
         $participants = $res->json('combat.participants');
         $this->assertCount(2, $participants);
         foreach ($participants as $p) {
             $this->assertIsInt($p['initiative']);
+            $this->assertTrue(Str::isUuid($p['rollId']));
         }
+        $this->assertSame(2, DB::table('roll_records')->where('scene_id', $scene->id)->count());
+        $this->assertSame($participants, $this->postJson("/api/scenes/{$scene->id}/combat/roll-initiative", $rollRequest)->assertOk()->json('combat.participants'));
+        $this->assertSame(2, DB::table('roll_records')->where('scene_id', $scene->id)->count());
 
         $current = $this->getJson("/api/scenes/{$scene->id}/combat")->json('combat');
         $this->assertSame(1, $current['round']);

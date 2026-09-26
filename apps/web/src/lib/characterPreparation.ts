@@ -74,7 +74,6 @@ export function preparationTasks(
     tasks.push(
       "Conferir escolhas de equipamento do antecedente quando não houver dados estruturados no catálogo.",
     );
-  tasks.push("Conferir talentos, idiomas, ferramentas e escolhas condicionais da origem/classe.");
   if (system.bio.level !== 1 && !system.progression)
     tasks.push(
       "Esta ficha antiga não possui metadados de progressão; vincule a classe antes de usar evolução assistida.",

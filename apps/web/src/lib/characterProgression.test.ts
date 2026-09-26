@@ -8,7 +8,7 @@ import {
   proficiencyBonusForLevel,
   subclassMatchesClass,
   subclassStartLevel,
-} from "./characterProgression";
+} from "@vtt/core";
 
 const entry = (
   name: string,

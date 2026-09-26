@@ -1,7 +1,8 @@
 import { ABILITY_LABELS, type Ability, type ActorSystem } from "@vtt/core";
 import type { Dispatch, SetStateAction } from "react";
 import type { CatalogEntry } from "../../lib/catalog";
-import { STANDARD_SCORES } from "../../lib/characterBuilder";
+import type { OriginChoice } from "../../lib/characterChoices";
+import { STANDARD_SCORES } from "@vtt/core";
 import type { spellLimits } from "../../lib/characterPreparation";
 import type { StartingEquipmentPlan, resolveStartingEquipment } from "../../lib/startingEquipment";
 import { CatalogPicker } from "./CatalogPicker";
@@ -51,6 +52,7 @@ export function ClassStep({
               <input
                 type="checkbox"
                 checked={skills.includes(skill)}
+                disabled={!skills.includes(skill) && skills.length >= skillChoice.count}
                 onChange={(event) =>
                   onSkills((current) =>
                     event.target.checked
@@ -72,19 +74,52 @@ export function OriginStep({
   ruleset,
   race,
   background,
+  subrace,
+  subraceCount,
+  feat,
+  needsFeat,
+  originRules,
+  originSelections,
   onRace,
   onBackground,
+  onSubrace,
+  onFeat,
+  onOriginSelections,
 }: {
   ruleset: string;
   race: CatalogEntry | null;
   background: CatalogEntry | null;
+  subrace: CatalogEntry | null;
+  subraceCount: number | null;
+  feat: CatalogEntry | null;
+  needsFeat: boolean;
+  originRules: OriginChoice[];
+  originSelections: Record<string, string[]>;
   onRace: (entry: CatalogEntry) => void;
   onBackground: (entry: CatalogEntry) => void;
+  onSubrace: (entry: CatalogEntry) => void;
+  onFeat: (entry: CatalogEntry) => void;
+  onOriginSelections: Dispatch<SetStateAction<Record<string, string[]>>>;
 }) {
   return (
     <>
       <h4>{ruleset === "5e-2024" ? "Espécie" : "Raça"}</h4>
       <CatalogPicker kind="races" edition={ruleset} value={race} onChange={onRace} />
+      {ruleset === "5e-2014" && race && subraceCount === null && (
+        <p role="status">Consultando as sub-raças disponíveis…</p>
+      )}
+      {ruleset === "5e-2014" && race && (subraceCount ?? 0) > 0 && (
+        <>
+          <h4>Sub-raça obrigatória</h4>
+          <CatalogPicker
+            kind="races"
+            edition={ruleset}
+            parentRace={{ name: race.name, source: race.source }}
+            value={subrace}
+            onChange={onSubrace}
+          />
+        </>
+      )}
       <h4>Antecedente</h4>
       <CatalogPicker
         kind="backgrounds"
@@ -92,6 +127,51 @@ export function OriginStep({
         value={background}
         onChange={onBackground}
       />
+      {needsFeat && (
+        <>
+          <h4>Talento de origem</h4>
+          <CatalogPicker kind="feats" edition={ruleset} value={feat} onChange={onFeat} />
+        </>
+      )}
+      {originRules.map((rule) => (
+        <fieldset key={rule.id}>
+          <legend>{rule.label}</legend>
+          {rule.fixed.length > 0 && <p>Concedidos: {rule.fixed.join(", ")}.</p>}
+          {rule.unsupported && (
+            <p role="status">
+              O catálogo traz uma escolha aberta sem lista normalizada; peça revisão explícita ao
+              mestre.
+            </p>
+          )}
+          {rule.count > 0 &&
+            rule.options.map((option) => {
+              const selected = originSelections[rule.id] ?? [];
+              return (
+                <label className="check-label" key={option}>
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(option)}
+                    disabled={!selected.includes(option) && selected.length >= rule.count}
+                    onChange={(event) =>
+                      onOriginSelections((current) => ({
+                        ...current,
+                        [rule.id]: event.target.checked
+                          ? [...(current[rule.id] ?? []), option]
+                          : (current[rule.id] ?? []).filter((choice) => choice !== option),
+                      }))
+                    }
+                  />{" "}
+                  {option}
+                </label>
+              );
+            })}
+          {rule.count > 0 && (
+            <p>
+              {(originSelections[rule.id] ?? []).length} de {rule.count} escolha(s).
+            </p>
+          )}
+        </fieldset>
+      ))}
     </>
   );
 }
@@ -225,6 +305,7 @@ export function AbilitiesStep({
                     )
                   }
                 >
+                  <option value="">Escolher atributo…</option>
                   {allowed.map((ability) => (
                     <option key={ability} value={ability}>
                       {ABILITY_LABELS[ability]}
@@ -252,6 +333,7 @@ export function EquipmentSpellsStep({
   limits,
   spellIssues,
   equipmentPlan,
+  manualReviewRequired,
   equipmentResolution,
   equipmentSelections,
   setEquipmentSelections,
@@ -265,12 +347,15 @@ export function EquipmentSpellsStep({
   setSpells,
   prepared,
   setPrepared,
+  manualEquipmentConfirmed,
+  onManualEquipmentConfirmed,
 }: {
   ruleset: string;
   selectedClass: CatalogEntry | null;
   limits: SpellLimits | null;
   spellIssues: string[];
   equipmentPlan: StartingEquipmentPlan;
+  manualReviewRequired: boolean;
   equipmentResolution: EquipmentResolution;
   equipmentSelections: Record<string, string>;
   setEquipmentSelections: Dispatch<SetStateAction<Record<string, string>>>;
@@ -284,6 +369,8 @@ export function EquipmentSpellsStep({
   setSpells: Dispatch<SetStateAction<CatalogEntry[]>>;
   prepared: string[];
   setPrepared: Dispatch<SetStateAction<string[]>>;
+  manualEquipmentConfirmed: boolean;
+  onManualEquipmentConfirmed: (value: boolean) => void;
 }) {
   return (
     <>
@@ -373,6 +460,28 @@ export function EquipmentSpellsStep({
           setEquipment={setEquipment}
           description="O catálogo desta classe/antecedente não possui equipamento inicial estruturado. Registre as escolhas manualmente."
         />
+      )}
+      {equipmentPlan.structured &&
+        manualReviewRequired &&
+        equipmentResolution.manualTypes.length === 0 && (
+          <ManualEquipmentPicker
+            ruleset={ruleset}
+            itemChoice={itemChoice}
+            setItemChoice={setItemChoice}
+            equipment={equipment}
+            setEquipment={setEquipment}
+            description="Uma das origens não possui opções estruturadas. Escolha seu equipamento inicial dela aqui."
+          />
+        )}
+      {manualReviewRequired && (
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={manualEquipmentConfirmed}
+            onChange={(event) => onManualEquipmentConfirmed(event.target.checked)}
+          />
+          Conferi o equipamento inicial selecionado manualmente com a origem e a classe.
+        </label>
       )}
 
       <h4>Magias e truques</h4>
@@ -473,6 +582,9 @@ export function ReviewStep({
   background,
   system,
   tasks,
+  exceptionReason,
+  canAuthorizeException,
+  onExceptionReason,
 }: {
   name: string;
   selectedClass: CatalogEntry | null;
@@ -480,6 +592,9 @@ export function ReviewStep({
   background: CatalogEntry | null;
   system: ActorSystem;
   tasks: string[];
+  exceptionReason: string;
+  canAuthorizeException: boolean;
+  onExceptionReason: (value: string) => void;
 }) {
   return (
     <>
@@ -498,18 +613,41 @@ export function ReviewStep({
         <dd>{system.speed} ft</dd>
         <dt>Características importadas</dt>
         <dd>{system.features.length}</dd>
+        <dt>Idiomas</dt>
+        <dd>{system.languages.join(", ") || "Nenhum"}</dd>
+        <dt>Equipamentos</dt>
+        <dd>
+          {system.inventory.map((item) => `${item.quantity}× ${item.name}`).join(", ") || "Nenhum"}
+        </dd>
+        <dt>Magias</dt>
+        <dd>{system.spells.known.map((spell) => spell.name).join(", ") || "Não se aplica"}</dd>
       </dl>
-      <h4>Pendências para revisar na mesa</h4>
+      <h4>
+        {tasks.length
+          ? "Escolhas pendentes (bloqueiam a criação)"
+          : "Todas as escolhas obrigatórias estão resolvidas"}
+      </h4>
       <ul>
         {tasks.map((task) => (
           <li key={task}>{task}</li>
         ))}
       </ul>
-      <p>
-        Equipamento e magias selecionados serão incluídos na ficha. Revise talentos e escolhas
-        específicas. O assistente prepara atributos, PV, salvaguardas, perícias e características;
-        escolhas específicas dos livros continuam editáveis.
-      </p>
+      {tasks.length > 0 && canAuthorizeException && (
+        <label>
+          Exceção autorizada pelo mestre (mínimo 20 caracteres, registrada na ficha)
+          <textarea
+            value={exceptionReason}
+            onChange={(event) => onExceptionReason(event.target.value)}
+            rows={3}
+          />
+        </label>
+      )}
+      {tasks.length > 0 && !canAuthorizeException && (
+        <p role="alert">
+          Resolva todas as escolhas antes de criar a ficha. Se o catálogo estiver incompleto, peça
+          ao mestre para concluir com uma exceção documentada.
+        </p>
+      )}
     </>
   );
 }

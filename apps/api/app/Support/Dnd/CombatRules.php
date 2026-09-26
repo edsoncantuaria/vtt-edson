@@ -16,6 +16,25 @@ final class CombatRules
     public static function validateAction(array $action): array
     {
         $validated = Validator::make($action, [
+            'id' => ['sometimes', 'string', 'min:1', 'max:80'],
+            'kind' => ['sometimes', Rule::in(['attack', 'spell', 'feature', 'item'])],
+            'name' => ['sometimes', 'string', 'min:1', 'max:120'],
+            'origin' => ['sometimes', 'string', 'max:160'],
+            'visibility' => ['sometimes', Rule::in(['public', 'gm'])],
+            'attackFormula' => ['sometimes', 'string', 'max:120'],
+            'damageFormula' => ['sometimes', 'string', 'max:120'],
+            'damageParts' => ['sometimes', 'array', 'min:1', 'max:8'],
+            'damageParts.*' => ['required', 'array:formula,damageType'],
+            'damageParts.*.formula' => ['required', 'string', 'max:120'],
+            'damageParts.*.damageType' => ['required', Rule::in(self::DAMAGE_TYPES)],
+            'imageUrl' => ['sometimes', 'url', 'max:2048', 'starts_with:https://'],
+            'effectUrl' => ['sometimes', 'url', 'max:2048', 'starts_with:https://'],
+            'target' => ['sometimes', Rule::in(['self', 'single', 'multiple'])],
+            'maxTargets' => ['sometimes', 'integer', 'between:1,50'],
+            'rangeFeet' => ['sometimes', 'integer', 'between:0,10000'],
+            'economy' => ['sometimes', Rule::in(['action', 'bonus', 'reaction', 'other'])],
+            'healingFormula' => ['sometimes', 'string', 'max:120'],
+            'description' => ['sometimes', 'string', 'max:10000'],
             'saveAbility' => ['sometimes', Rule::in(self::ABILITIES)],
             'saveDc' => ['sometimes', 'integer', 'min:1', 'max:99'],
             'saveEffect' => ['required_with:saveAbility', Rule::in(['half', 'none'])],
@@ -45,6 +64,15 @@ final class CombatRules
         ])->validate();
         foreach (data_get($validated, 'effect.modifiers', []) as $modifier) {
             abort_unless(is_array($modifier) && ActiveEffectEngine::validModifier($modifier), 422, 'Modificador de efeito inválido.');
+        }
+        foreach (['attackFormula', 'damageFormula', 'healingFormula'] as $formulaField) {
+            if (isset($action[$formulaField]) && trim((string) $action[$formulaField]) !== '') {
+                abort_unless(app(DiceRoller::class)->isValid((string) $action[$formulaField]), 422, 'Fórmula de '.$formulaField.' inválida.');
+            }
+        }
+        abort_if(! empty($action['damageParts']) && isset($action['damageFormula']), 422, 'Escolha fórmula única ou componentes tipados, não ambos.');
+        foreach ($action['damageParts'] ?? [] as $part) {
+            abort_unless(app(DiceRoller::class)->isValid((string) $part['formula']), 422, 'Fórmula de componente de dano inválida.');
         }
 
         return $validated;
@@ -105,7 +133,7 @@ final class CombatRules
         return (int) floor((($system['abilities'][$ability]['score'] ?? 10) - 10) / 2);
     }
 
-    public static function save(array $system, string $ability, int $dc, array $options, DiceRoller $dice, array $houseRules, string $label): array
+    public static function save(array $system, string $ability, int $dc, array $options, DiceRoller $dice, array $houseRules, string $label, ?\Closure $persistRoll = null): array
     {
         // Monster stat blocks often specify the total, including bespoke bonuses.
         $bonus = $system['saves'][$ability]['bonus'] ?? null;
@@ -116,7 +144,8 @@ final class CombatRules
             'advantage' => '2d20kh1', 'disadvantage' => '2d20kl1', default => '1d20'
         };
         $adjusted = HouseRules::apply($formula.($bonus >= 0 ? '+' : '').$bonus, $label, $houseRules);
-        $roll = $dice->roll($adjusted['formula'].($options['effectFormula'] ?? ''));
+        $effectiveFormula = $adjusted['formula'].($options['effectFormula'] ?? '');
+        $roll = $persistRoll ? $persistRoll($effectiveFormula, $adjusted['rules'], $mode) : $dice->roll($effectiveFormula);
 
         return ['ability' => $ability, 'dc' => $dc, 'success' => $roll['total'] >= $dc, 'roll' => $roll, 'houseRules' => $adjusted['rules'], 'mode' => $mode];
     }
@@ -147,49 +176,32 @@ final class CombatRules
         ];
     }
 
-    public static function damage(array $message, array $system, ?array $save, ?float $override = null): array
+    public static function damage(array $message, array $system, ?array $save, ?float $override = null, string $hitDecision = 'auto', ?int $damageOverride = null): array
     {
-        $roll = collect($message['rolls'] ?? [])->firstWhere('kind', 'damage');
-        abort_unless($roll, 422, 'Esta ação não contém dano.');
-        $amount = max(0, (int) $roll['total']);
-        $steps = ['Dano rolado: '.$amount];
+        abort_unless(in_array($hitDecision, ['auto', 'hit', 'miss'], true), 422, 'Decisão de ataque inválida.');
+        $rolls = collect($message['rolls'] ?? [])->where('kind', 'damage')->values()->all();
+        abort_unless($rolls, 422, 'Esta ação não contém dano.');
+        $steps = [];
         $attack = self::attack($message, $system);
-        $hit = $attack['hit'] ?? null;
-        $pending = isset($message['save']) && $save === null && $hit !== false;
-        if ($override !== null) {
-            $amount = max(0, (int) floor($amount * $override));
-            $steps[] = 'Decisão manual: ×'.$override.' (substitui salvaguarda, acerto e defesas)';
-        } else {
-            if ($hit === false) {
-                $amount = 0;
-                $steps[] = 'Ataque não alcançou a CA atual';
-            }
-            if ($save !== null && $save['success']) {
-                $amount = $message['save']['effect'] === 'half' ? (int) floor($amount / 2) : 0;
-                $steps[] = 'Salvaguarda bem-sucedida: '.$amount;
-            }
-            $type = $message['damageType'] ?? null;
-            if ($type) {
-                $defenses = $system['damageTraits'] ?? [];
-                if (in_array($type, $defenses['immune'] ?? [], true)) {
-                    $amount = 0;
-                    $steps[] = 'Imunidade: 0';
-                } else {
-                    if (in_array($type, $defenses['resist'] ?? [], true)) {
-                        $amount = (int) floor($amount / 2);
-                        $steps[] = 'Resistência: '.$amount;
-                    }
-                    if (in_array($type, $defenses['vulnerable'] ?? [], true)) {
-                        $amount *= 2;
-                        $steps[] = 'Vulnerabilidade: '.$amount;
-                    }
-                }
-            } else {
-                $steps[] = 'Tipo de dano não definido; defesas não calculadas';
+        abort_if($hitDecision !== 'auto' && $attack === null, 422, 'Esta ação não possui uma rolagem de ataque.');
+        if ($attack) {
+            $attack['automaticHit'] = $attack['hit'];
+            if ($hitDecision !== 'auto') {
+                $attack['hit'] = $hitDecision === 'hit';
+                $steps[] = 'Decisão do mestre: '.($attack['hit'] ? 'acerto' : 'erro').' (resultado original preservado)';
             }
         }
+        $hit = $attack['hit'] ?? null;
+        abort_if($hitDecision === 'miss' && $override !== null && $override > 0, 422, 'Um erro decidido não pode aplicar dano positivo.');
+        $pending = isset($message['save']) && $save === null && $hit !== false;
+        abort_if($hitDecision === 'miss' && $damageOverride !== null && $damageOverride > 0, 422, 'Um erro decidido não pode aplicar dano positivo.');
+        $parts = array_map(fn ($roll) => ['total' => (int) $roll['total'],
+            'damageType' => $roll['damageType'] ?? $message['damageType'] ?? null, 'id' => $roll['id'] ?? null], $rolls);
+        $outcome = VitalityCalculator::damage($parts, $system, $save, $message['save']['effect'] ?? null, $hit, $override, $damageOverride);
 
-        return ['damage' => $amount, 'steps' => $steps, 'hit' => $hit, 'attack' => $attack, 'pendingSave' => $pending && $override === null, 'manual' => $override !== null];
+        return [...$outcome, 'steps' => [...$steps, ...$outcome['steps']], 'hit' => $hit, 'attack' => $attack,
+            'hitDecision' => $hitDecision, 'pendingSave' => $pending && $override === null && $damageOverride === null,
+            'manual' => $override !== null || $damageOverride !== null || $hitDecision !== 'auto'];
     }
 
     public static function concentrationDc(int $damage, string $ruleset): int
@@ -201,8 +213,10 @@ final class CombatRules
 
     public static function criticalFormula(string $formula): string
     {
-        abort_unless(preg_match('/^(\d*)d(\d+)([+-]\d+)?$/i', trim($formula), $m), 422, 'Revise a fórmula de dano crítico; use NdM±K.');
+        $formula = preg_replace('/\s+/', '', trim($formula));
+        abort_unless(preg_match('/^[+-]?\d*d\d+(?:[+-](?:\d*d\d+|\d+))*$/i', $formula), 422, 'Revise a fórmula de dano crítico; use somas de dados e modificadores.');
 
-        return ((int) ($m[1] !== '' ? $m[1] : 1) * 2).'d'.$m[2].($m[3] ?? '');
+        // 5e (2014/2024): double each damage die, never a flat modifier.
+        return preg_replace_callback('/(\d*)d(\d+)/i', fn ($m) => (2 * (int) ($m[1] === '' ? 1 : $m[1])).'d'.$m[2], $formula);
     }
 }

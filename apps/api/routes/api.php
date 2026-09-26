@@ -1,7 +1,10 @@
 <?php
 
+use App\Http\Controllers\Api\ActionHealingController;
 use App\Http\Controllers\Api\ActiveEffectController;
+use App\Http\Controllers\Api\ActorAdvancementController;
 use App\Http\Controllers\Api\ActorController;
+use App\Http\Controllers\Api\ActorDeathSaveController;
 use App\Http\Controllers\Api\ActorDocumentController;
 use App\Http\Controllers\Api\ActorRestController;
 use App\Http\Controllers\Api\AdventureImportController;
@@ -34,6 +37,7 @@ use App\Http\Controllers\Api\SceneCanvasController;
 use App\Http\Controllers\Api\SceneChatController;
 use App\Http\Controllers\Api\SceneController;
 use App\Http\Controllers\Api\SceneGeometryController;
+use App\Http\Controllers\Api\SceneRollController;
 use App\Http\Controllers\Api\SceneTokenController;
 use App\Http\Middleware\SerializeSceneWrites;
 use Illuminate\Support\Facades\Broadcast;
@@ -138,12 +142,20 @@ Route::middleware(['auth:sanctum', SerializeSceneWrites::class])->group(function
     Route::post('/scenes/{scene}/canvas/pings', [SceneCanvasController::class, 'ping']);
     Route::delete('/scenes/{scene}/canvas/{kind}/{id}', [SceneCanvasController::class, 'destroy']);
     Route::post('/scenes/{scene}/chat', [SceneChatController::class, 'store']);
+    Route::get('/scenes/{scene}/rolls', [SceneRollController::class, 'index']);
+    Route::post('/scenes/{scene}/rolls', [SceneRollController::class, 'store']);
+    Route::post('/scenes/{scene}/actors/{actor}/death-save', [ActorDeathSaveController::class, 'store']);
     Route::get('/scenes/{scene}/private-messages', [PrivateMessageController::class, 'index']);
     Route::post('/scenes/{scene}/private-messages', [PrivateMessageController::class, 'store']);
     Route::get('/scenes/{scene}/damage/{messageId}', [DamageController::class, 'show']);
     Route::post('/scenes/{scene}/damage/{messageId}/save', [DamageController::class, 'save']);
+    Route::get('/scenes/{scene}/actions/{messageId}/save-batch', [DamageController::class, 'batchIndex']);
+    Route::post('/scenes/{scene}/actions/{messageId}/save-batch', [DamageController::class, 'batchSave']);
+    Route::post('/scenes/{scene}/actions/{messageId}/resolve-batch', [DamageController::class, 'batchApply']);
     Route::post('/scenes/{scene}/damage/{messageId}/concentration', [DamageController::class, 'concentration']);
     Route::post('/scenes/{scene}/actions/{messageId}/undo', [DamageController::class, 'undoAction']);
+    Route::get('/scenes/{scene}/actions/{messageId}/heal', [ActionHealingController::class, 'show']);
+    Route::post('/scenes/{scene}/actions/{messageId}/heal', [ActionHealingController::class, 'store']);
     Route::post('/scenes/{scene}/damage/{messageId}', [DamageController::class, 'store']);
     Route::get('/scenes/{scene}/actions', [DamageController::class, 'history']);
     Route::post('/scenes/{scene}/actions', [SceneActionController::class, 'action']);
@@ -153,6 +165,7 @@ Route::middleware(['auth:sanctum', SerializeSceneWrites::class])->group(function
     Route::get('/actors/{actor}', [ActorController::class, 'show']);
     Route::post('/actors/{actor}/image', [ActorController::class, 'uploadImage']);
     Route::patch('/actors/{actor}', [ActorController::class, 'update']);
+    Route::post('/actors/{actor}/advancements', [ActorAdvancementController::class, 'store']);
     Route::delete('/actors/{actor}', [ActorController::class, 'destroy']);
     Route::get('/actors/{actor}/export', [ActorController::class, 'export']);
     Route::post('/actors/{actor}/rest', [ActorRestController::class, 'store']);

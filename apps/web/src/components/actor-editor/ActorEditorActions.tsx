@@ -6,16 +6,23 @@ import {
   type ActorSystem,
 } from "@vtt/core";
 import { Icon } from "../Icon";
+import {
+  createCustomAction,
+  duplicateActorAction,
+  type CustomActionPreset,
+} from "../../lib/customActions";
 import type { MutateActorSystem } from "./ActorEditorFields";
 
 export function ActionsSection({
   system,
   documents,
   mutate,
+  canManage,
 }: {
   system: ActorSystem;
   documents: ActorDocument[];
   mutate: MutateActorSystem;
+  canManage: boolean;
 }) {
   return (
     <>
@@ -140,10 +147,22 @@ export function ActionsSection({
           {system.actions
             .filter((action) => action.id.startsWith("document:"))
             .map((action) => (
-              <p key={action.id}>
-                <b>{action.name}</b> ·{" "}
-                {action.attackFormula ?? action.damageFormula ?? "efeito/salvaguarda"}
-              </p>
+              <div key={action.id}>
+                <p>
+                  <b>{action.name}</b> ·{" "}
+                  {action.attackFormula ?? action.damageFormula ?? "efeito/salvaguarda"}
+                </p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    mutate((next) =>
+                      next.actions.push(duplicateActorAction(action, crypto.randomUUID())),
+                    )
+                  }
+                >
+                  Duplicar como ação independente
+                </button>
+              </div>
             ))}
         </details>
       )}
@@ -156,25 +175,31 @@ export function ActionsSection({
             system={system}
             documents={documents}
             mutate={mutate}
+            canManage={canManage}
           />
         ),
       )}
-      <button
-        type="button"
-        onClick={() =>
-          mutate((next) => {
-            next.actions.push({
-              id: crypto.randomUUID(),
-              name: "Nova ação",
-              kind: "attack",
-              attackFormula: "1d20+0",
+      <label>
+        Criar ação sem código
+        <select
+          defaultValue=""
+          onChange={(event) => {
+            if (!event.target.value) return;
+            const preset = event.target.value as CustomActionPreset;
+            mutate((next) => {
+              next.actions.push(createCustomAction(preset, crypto.randomUUID()));
             });
-          })
-        }
-      >
-        <Icon name="plus" size={16} />
-        Adicionar ação
-      </button>
+            event.target.value = "";
+          }}
+        >
+          <option value="">Escolher modelo…</option>
+          <option value="attack">Ataque simples</option>
+          <option value="torch">Ataque com tocha</option>
+          <option value="maneuver">Manobra</option>
+          <option value="potion">Poção de cura</option>
+          <option value="feature">Habilidade personalizada</option>
+        </select>
+      </label>
     </>
   );
 }
@@ -185,12 +210,14 @@ function ActionEditor({
   system,
   documents,
   mutate,
+  canManage,
 }: {
   action: ActorAction;
   index: number;
   system: ActorSystem;
   documents: ActorDocument[];
   mutate: MutateActorSystem;
+  canManage: boolean;
 }) {
   return (
     <section className="editor-item">
@@ -213,14 +240,25 @@ function ActionEditor({
             value={action.kind}
             onChange={(event) =>
               mutate((next) => {
-                next.actions[index].kind = event.target.value as "attack" | "spell";
+                next.actions[index].kind = event.target.value as ActorAction["kind"];
               })
             }
           >
             <option value="attack">Ataque</option>
             <option value="spell">Magia</option>
+            <option value="feature">Habilidade</option>
+            <option value="item">Item</option>
           </select>
         </label>
+        <button
+          type="button"
+          aria-label={`Duplicar ${action.name}`}
+          onClick={() =>
+            mutate((next) => next.actions.push(duplicateActorAction(action, crypto.randomUUID())))
+          }
+        >
+          Duplicar
+        </button>
         <button
           type="button"
           className="icon-button danger"
@@ -236,6 +274,36 @@ function ActionEditor({
       </div>
       <div className="editor-grid">
         <label>
+          Origem da ação
+          <input
+            maxLength={160}
+            value={action.origin ?? ""}
+            placeholder="Mesa · regra da casa / fonte"
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].origin = event.target.value || undefined;
+              })
+            }
+          />
+        </label>
+        <label>
+          Visibilidade
+          <select
+            value={action.visibility ?? "public"}
+            disabled={!canManage && action.visibility === "gm"}
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].visibility = event.target.value as "public" | "gm";
+              })
+            }
+          >
+            <option value="public">Pública para participantes autorizados</option>
+            {canManage && <option value="gm">Somente mestre</option>}
+          </select>
+        </label>
+      </div>
+      <div className="editor-grid">
+        <label>
           Fórmula de ataque
           <input
             value={action.attackFormula ?? ""}
@@ -248,9 +316,10 @@ function ActionEditor({
           />
         </label>
         <label>
-          Fórmula de dano
+          Fórmula de dano {action.damageParts?.length ? "(use componentes abaixo)" : ""}
           <input
             value={action.damageFormula ?? ""}
+            disabled={!!action.damageParts?.length}
             placeholder="8d6"
             onChange={(event) =>
               mutate((next) => {
@@ -259,6 +328,171 @@ function ActionEditor({
             }
           />
         </label>
+      </div>
+      <details>
+        <summary>Componentes de dano por tipo (ex.: fogo + cortante)</summary>
+        <p className="panel-hint">
+          Cada componente tem fórmula e tipo próprios para calcular resistência, imunidade e
+          vulnerabilidade separadamente. Até 8 componentes; substituem a fórmula única.
+          {action.damageFormula &&
+            !action.damageType &&
+            " Defina primeiro o tipo de dano da fórmula atual para convertê-la sem adivinhar a regra."}
+        </p>
+        {action.damageParts?.map((part, partIndex) => (
+          <div className="editor-grid" key={partIndex}>
+            <label>
+              Componente {partIndex + 1} · fórmula
+              <input
+                value={part.formula}
+                placeholder="2d6+1"
+                onChange={(event) =>
+                  mutate((next) => {
+                    next.actions[index].damageParts![partIndex].formula = event.target.value;
+                  })
+                }
+              />
+            </label>
+            <label>
+              Tipo do componente
+              <select
+                value={part.damageType}
+                onChange={(event) =>
+                  mutate((next) => {
+                    next.actions[index].damageParts![partIndex].damageType = event.target
+                      .value as NonNullable<ActorAction["damageParts"]>[number]["damageType"];
+                  })
+                }
+              >
+                {Object.entries(DAMAGE_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() =>
+                mutate((next) => {
+                  next.actions[index].damageParts = next.actions[index].damageParts!.filter(
+                    (_, i) => i !== partIndex,
+                  );
+                  if (!next.actions[index].damageParts!.length)
+                    next.actions[index].damageParts = undefined;
+                })
+              }
+            >
+              Remover componente {partIndex + 1}
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          disabled={
+            (action.damageParts?.length ?? 0) >= 8 || (!!action.damageFormula && !action.damageType)
+          }
+          onClick={() =>
+            mutate((next) => {
+              const target = next.actions[index];
+              const seed = target.damageFormula
+                ? ({
+                    formula: target.damageFormula,
+                    damageType: target.damageType!,
+                  } as NonNullable<ActorAction["damageParts"]>[number])
+                : null;
+              target.damageParts = [
+                ...(target.damageParts ?? (seed ? [seed] : [])),
+                { formula: "1d6", damageType: "fire" },
+              ];
+              target.damageFormula = undefined;
+            })
+          }
+        >
+          Adicionar componente tipado
+        </button>
+      </details>
+      <div className="editor-grid">
+        <label>
+          Fórmula de cura
+          <input
+            value={action.healingFormula ?? ""}
+            placeholder="1d8+3"
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].healingFormula = event.target.value || undefined;
+              })
+            }
+          />
+        </label>
+        <label>
+          Imagem HTTPS (opcional)
+          <input
+            type="url"
+            value={action.imageUrl ?? ""}
+            placeholder="https://…"
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].imageUrl = event.target.value || undefined;
+              })
+            }
+          />
+        </label>
+      </div>
+      <div className="editor-grid">
+        <label>
+          Alvos
+          <select
+            value={action.target ?? ""}
+            onChange={(event) =>
+              mutate((next) => {
+                next.actions[index].target = event.target.value
+                  ? (event.target.value as ActorAction["target"])
+                  : undefined;
+              })
+            }
+          >
+            <option value="">Legado · seleção livre</option>
+            <option value="self">A própria ficha</option>
+            <option value="single">Um alvo</option>
+            <option value="multiple">Vários alvos</option>
+          </select>
+        </label>
+        {action.target === "multiple" && (
+          <label>
+            Máximo de alvos
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={action.maxTargets ?? 2}
+              onChange={(event) =>
+                mutate((next) => {
+                  next.actions[index].maxTargets = Math.min(
+                    50,
+                    Math.max(1, Number(event.target.value)),
+                  );
+                })
+              }
+            />
+          </label>
+        )}
+        {action.target !== "self" && (
+          <label>
+            Alcance em pés (vazio = decisão da mesa)
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              value={action.rangeFeet ?? ""}
+              onChange={(event) =>
+                mutate((next) => {
+                  next.actions[index].rangeFeet =
+                    event.target.value === "" ? undefined : Math.max(0, Number(event.target.value));
+                })
+              }
+            />
+          </label>
+        )}
       </div>
       <div className="editor-grid">
         <label>

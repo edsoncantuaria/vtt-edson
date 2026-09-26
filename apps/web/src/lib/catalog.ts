@@ -1,6 +1,7 @@
 import type { Ability } from "@vtt/core";
 
 export type CatalogKind =
+  | "all"
   | "spells"
   | "items"
   | "monsters"
@@ -61,6 +62,11 @@ export type FiveToolsRaw = Record<string, unknown> & {
   preparedSpellsProgression?: number[];
   proficiency?: string[];
   skillProficiencies?: Array<Record<string, unknown>>;
+  languageProficiencies?: Array<Record<string, unknown>>;
+  toolProficiencies?: Array<Record<string, unknown>>;
+  feats?: Array<Record<string, unknown>>;
+  raceName?: string;
+  raceSource?: string;
   speed?: number | { walk?: number };
   spellcastingAbility?: Ability;
   spellsKnownProgression?: number[];
@@ -122,6 +128,11 @@ export type CatalogEntry = {
   name: string;
   source: string;
   edition: string;
+  content_hash?: string | null;
+  homebrewId?: number;
+  packageId?: number;
+  homebrewVersion?: number;
+  inCampaign?: boolean;
   level?: number;
   data: CatalogData;
 };
@@ -147,6 +158,7 @@ export type CatalogResults = {
 };
 
 export const CATALOG_KINDS: { id: CatalogKind; label: string; optional?: boolean }[] = [
+  { id: "all", label: "Todos os conteúdos" },
   { id: "spells", label: "Magias" },
   { id: "items", label: "Equipamentos" },
   { id: "monsters", label: "Criaturas" },
