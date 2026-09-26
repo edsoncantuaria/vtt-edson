@@ -174,6 +174,7 @@ Route::middleware(['auth:sanctum', SerializeSceneWrites::class])->group(function
     Route::patch('/actor-documents/{actorDocument}', [ActorDocumentController::class, 'update']);
     Route::delete('/actor-documents/{actorDocument}', [ActorDocumentController::class, 'destroy']);
     Route::get('/actors/{actor}/effects', [ActiveEffectController::class, 'index']);
+    Route::get('/actors/{actor}/effect-history', [ActiveEffectController::class, 'history']);
     Route::post('/actors/{actor}/effects', [ActiveEffectController::class, 'store']);
     Route::patch('/active-effects/{activeEffect}', [ActiveEffectController::class, 'update']);
     Route::delete('/active-effects/{activeEffect}', [ActiveEffectController::class, 'destroy']);

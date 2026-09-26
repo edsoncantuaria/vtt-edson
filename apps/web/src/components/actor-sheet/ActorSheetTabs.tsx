@@ -24,7 +24,7 @@ const ECONOMY_LABEL = {
 } as const;
 
 type ChangeActor = (change: (system: ActorSystem) => void) => Promise<void>;
-type Roll = (formula: string, label: string) => Promise<void>;
+type Roll = (formula: string, label: string, ability?: Ability) => Promise<void>;
 
 export function AttributesTab({
   actor,
@@ -94,7 +94,7 @@ export function AttributesTab({
               key={ability}
               disabled={busy || !canEdit}
               onClick={() =>
-                void roll(formula(modifier), `Salvaguarda de ${ABILITY_LABELS[ability]}`)
+                void roll(formula(modifier), `Salvaguarda de ${ABILITY_LABELS[ability]}`, ability)
               }
             >
               <span>{ABILITY_LABELS[ability]}</span>

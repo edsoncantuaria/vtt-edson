@@ -2,6 +2,8 @@ import type { Actor } from "@vtt/core";
 import { useState } from "react";
 import { api } from "../../lib/api";
 import { useSession } from "../../store/session";
+import { CONDITION_LABELS, conditionLabel } from "../../lib/conditions";
+import { publicAssetUrl } from "../../lib/assets";
 
 const MODIFIER_PATHS = [
   ["ac", "Classe de Armadura"],
@@ -21,17 +23,51 @@ const MODIFIER_PATHS = [
   ["spell.saveDc", "CD de magia"],
 ] as const;
 
-export function ActorEffectsTab({ actor, canEdit }: { actor: Actor; canEdit: boolean }) {
+export function ActorEffectsTab({
+  actor,
+  canEdit,
+  manager = false,
+}: {
+  actor: Actor;
+  canEdit: boolean;
+  manager?: boolean;
+}) {
   const upsertActor = useSession((state) => state.upsertActor);
   const setError = useSession((state) => state.setError);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
+  const [sourceLabel, setSourceLabel] = useState("");
+  const [iconUrl, setIconUrl] = useState("");
+  const [visibility, setVisibility] = useState<"public" | "gm">("public");
   const [durationUnit, setDurationUnit] = useState("rounds");
+  const [phase, setPhase] = useState("round");
   const [remaining, setRemaining] = useState(1);
   const [path, setPath] = useState("ac");
   const [mode, setMode] = useState("add");
   const [value, setValue] = useState(1);
   const [condition, setCondition] = useState("");
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editSource, setEditSource] = useState("");
+  const [editIcon, setEditIcon] = useState("");
+  const [editConditions, setEditConditions] = useState("");
+  const [editRemaining, setEditRemaining] = useState(1);
+  const [editPhase, setEditPhase] = useState<"round" | "start" | "end">("round");
+  const [editVisibility, setEditVisibility] = useState<"public" | "gm">("public");
+  const [editReason, setEditReason] = useState("");
+  const [history, setHistory] = useState<
+    Array<{
+      id: number;
+      event: string;
+      effect_id: number;
+      created_at: string;
+      user_name: string | null;
+      reason: string | null;
+      before: string | null;
+      after: string | null;
+    }>
+  >([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   async function run<T>(operation: () => Promise<T>): Promise<T | undefined> {
     if (busy) return;
@@ -53,15 +89,18 @@ export function ActorEffectsTab({ actor, canEdit }: { actor: Actor; canEdit: boo
         method: "POST",
         body: JSON.stringify({
           name: name.trim(),
+          source_label: sourceLabel.trim() || "Ficha · decisão da mesa",
+          icon_url: iconUrl.trim() || null,
+          visibility,
           duration: {
             unit: durationUnit,
+            ...(durationUnit === "rounds" ? { phase } : {}),
             ...(durationUnit === "rounds" || durationUnit === "minutes" || durationUnit === "hours"
-              ? { remaining: Math.max(0, remaining) }
+              ? { remaining: Math.max(1, remaining) }
               : {}),
           },
           modifiers: value === 0 ? [] : [{ path, mode, value }],
           conditions: condition.trim() ? [condition.trim()] : [],
-          metadata: { source: "sheet" },
           active: true,
         }),
       }),
@@ -71,6 +110,8 @@ export function ActorEffectsTab({ actor, canEdit }: { actor: Actor; canEdit: boo
       setName("");
       setCondition("");
       setValue(1);
+      setSourceLabel("");
+      setIconUrl("");
     }
   }
 
@@ -101,6 +142,20 @@ export function ActorEffectsTab({ actor, canEdit }: { actor: Actor; canEdit: boo
     if (result) upsertActor(result.actor);
   }
 
+  async function viewHistory() {
+    if (historyOpen) {
+      setHistoryOpen(false);
+      return;
+    }
+    const result = await run(() =>
+      api<{ events: typeof history }>(`/actors/${actor.id}/effect-history`),
+    );
+    if (result) {
+      setHistory(result.events);
+      setHistoryOpen(true);
+    }
+  }
+
   return (
     <div className="sheet-items">
       <div className="item-actions">
@@ -120,15 +175,23 @@ export function ActorEffectsTab({ actor, canEdit }: { actor: Actor; canEdit: boo
       {actor.activeEffects.map((effect) => (
         <article key={effect.id}>
           <div>
+            {effect.icon_url && publicAssetUrl(effect.icon_url) && (
+              <img src={publicAssetUrl(effect.icon_url)!} alt="" width={28} height={28} />
+            )}
             <h4>{effect.name}</h4>
             <small>
               {effect.duration.unit === "rounds"
-                ? `${effect.duration.remaining ?? 0} rodada(s)`
+                ? `${effect.duration.remaining ?? 0} rodada(s) · ${effect.duration.phase === "start" ? "início do turno" : effect.duration.phase === "end" ? "fim do turno" : "fim da rodada"}`
                 : effect.duration.unit.replaceAll("-", " ")}
               {!effect.active ? " · desativado" : ""}
             </small>
+            {effect.source_label && <small>Origem: {effect.source_label}</small>}
+            {manager && effect.visibility === "gm" && <small> · Oculto dos jogadores</small>}
+            {effect.concentration_id && <small> · Vinculado à concentração</small>}
           </div>
-          {!!effect.conditions.length && <p>Condições: {effect.conditions.join(", ")}</p>}
+          {!!effect.conditions.length && (
+            <p>Condições: {effect.conditions.map(conditionLabel).join(", ")}</p>
+          )}
           {!!effect.modifiers.length && (
             <p>
               {effect.modifiers
@@ -151,10 +214,190 @@ export function ActorEffectsTab({ actor, canEdit }: { actor: Actor; canEdit: boo
               >
                 Remover
               </button>
+              {manager && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    if (editing === effect.id) {
+                      setEditing(null);
+                      return;
+                    }
+                    setEditing(effect.id);
+                    setEditName(effect.name);
+                    setEditSource(effect.source_label ?? "");
+                    setEditIcon(effect.icon_url ?? "");
+                    setEditConditions(effect.conditions.join(", "));
+                    setEditRemaining(effect.duration.remaining ?? 1);
+                    setEditPhase(effect.duration.phase ?? "round");
+                    setEditVisibility(effect.visibility);
+                    setEditReason("");
+                  }}
+                >
+                  {editing === effect.id ? "Cancelar revisão" : "Revisar efeito"}
+                </button>
+              )}
+            </div>
+          )}
+          {manager && editing === effect.id && (
+            <div className="editor-grid" aria-label={`Revisar ${effect.name}`}>
+              <label>
+                Nome
+                <input
+                  value={editName}
+                  maxLength={160}
+                  onChange={(event) => setEditName(event.target.value)}
+                />
+              </label>
+              <label>
+                Origem
+                <input
+                  value={editSource}
+                  maxLength={160}
+                  onChange={(event) => setEditSource(event.target.value)}
+                />
+              </label>
+              <label>
+                Ícone HTTPS
+                <input
+                  type="url"
+                  value={editIcon}
+                  onChange={(event) => setEditIcon(event.target.value)}
+                />
+              </label>
+              <label>
+                Condições (separadas por vírgula)
+                <input
+                  value={editConditions}
+                  onChange={(event) => setEditConditions(event.target.value)}
+                />
+              </label>
+              {effect.duration.unit === "rounds" && (
+                <>
+                  <label>
+                    Rodadas restantes
+                    <input
+                      type="number"
+                      min={1}
+                      max={100000}
+                      value={editRemaining}
+                      onChange={(event) => setEditRemaining(Number(event.target.value))}
+                    />
+                  </label>
+                  <label>
+                    Expirar
+                    <select
+                      value={editPhase}
+                      onChange={(event) =>
+                        setEditPhase(event.target.value as "round" | "start" | "end")
+                      }
+                    >
+                      <option value="round">Fim da rodada</option>
+                      <option value="start">Início do turno</option>
+                      <option value="end">Fim do turno</option>
+                    </select>
+                  </label>
+                </>
+              )}
+              <label>
+                Visibilidade
+                <select
+                  value={editVisibility}
+                  onChange={(event) => setEditVisibility(event.target.value as "public" | "gm")}
+                >
+                  <option value="public">Pública</option>
+                  <option value="gm">Somente mestre</option>
+                </select>
+              </label>
+              <label>
+                Motivo da revisão
+                <input
+                  value={editReason}
+                  maxLength={240}
+                  onChange={(event) => setEditReason(event.target.value)}
+                  placeholder="Decisão da mesa"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={
+                  busy ||
+                  !editName.trim() ||
+                  !editReason.trim() ||
+                  (effect.duration.unit === "rounds" &&
+                    (!Number.isInteger(editRemaining) || editRemaining < 1))
+                }
+                onClick={() =>
+                  void patchEffect(effect.id, {
+                    name: editName.trim(),
+                    source_label: editSource.trim() || null,
+                    icon_url: editIcon.trim() || null,
+                    conditions: editConditions
+                      .split(",")
+                      .map((value) => value.trim())
+                      .filter(Boolean),
+                    visibility: editVisibility,
+                    ...(effect.duration.unit === "rounds"
+                      ? {
+                          duration: {
+                            ...effect.duration,
+                            remaining: editRemaining,
+                            phase: editPhase,
+                          },
+                        }
+                      : {}),
+                    reason: editReason.trim(),
+                  }).then(() => setEditing(null))
+                }
+              >
+                Salvar revisão auditada
+              </button>
             </div>
           )}
         </article>
       ))}
+
+      {manager && (
+        <section>
+          <button type="button" disabled={busy} onClick={() => void viewHistory()}>
+            {historyOpen ? "Ocultar histórico" : "Inspecionar histórico dos efeitos"}
+          </button>
+          {historyOpen && (
+            <div className="sheet-items" aria-label="Histórico auditado dos efeitos">
+              {!history.length && <p>Nenhuma alteração registrada.</p>}
+              {history.map((event) => (
+                <details key={event.id}>
+                  <summary>
+                    #{event.effect_id} · {event.event} · {event.user_name ?? "Sistema"} ·{" "}
+                    {new Date(event.created_at).toLocaleString("pt-BR")}
+                  </summary>
+                  {event.reason && <small>Motivo: {event.reason}</small>}
+                  {(["before", "after"] as const).map((key) => {
+                    const snapshot = event[key]
+                      ? (JSON.parse(event[key]!) as {
+                          name?: string;
+                          active?: boolean;
+                          duration?: { remaining?: number };
+                          conditions?: string[];
+                        })
+                      : null;
+                    return (
+                      snapshot && (
+                        <small key={key}>
+                          {key === "before" ? "Antes" : "Depois"}: {snapshot.name ?? "Efeito"} ·{" "}
+                          {snapshot.active ? "ativo" : "inativo"} ·{" "}
+                          {snapshot.duration?.remaining ?? "—"} restante ·{" "}
+                          {(snapshot.conditions ?? []).map(conditionLabel).join(", ")}
+                        </small>
+                      )
+                    );
+                  })}
+                </details>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {canEdit && (
         <details>
@@ -182,6 +425,16 @@ export function ActorEffectsTab({ actor, canEdit }: { actor: Actor; canEdit: boo
                 <option value="permanent">Permanente</option>
               </select>
             </label>
+            {durationUnit === "rounds" && (
+              <label>
+                Expiração
+                <select value={phase} onChange={(event) => setPhase(event.target.value)}>
+                  <option value="round">Fim da rodada</option>
+                  <option value="start">Início do turno</option>
+                  <option value="end">Fim do turno</option>
+                </select>
+              </label>
+            )}
             {["rounds", "minutes", "hours"].includes(durationUnit) && (
               <label>
                 Restante
@@ -225,9 +478,47 @@ export function ActorEffectsTab({ actor, canEdit }: { actor: Actor; canEdit: boo
                 value={condition}
                 maxLength={120}
                 onChange={(event) => setCondition(event.target.value)}
-                placeholder="blessed, poisoned…"
+                placeholder="poisoned, restrained, prone…"
+                list={`condition-list-${actor.id}`}
+              />
+              <datalist id={`condition-list-${actor.id}`}>
+                {Object.entries(CONDITION_LABELS).map(([key, entry]) => (
+                  <option key={key} value={key}>
+                    {entry.label}
+                  </option>
+                ))}
+              </datalist>
+            </label>
+            <label>
+              Origem do efeito
+              <input
+                value={sourceLabel}
+                maxLength={160}
+                onChange={(event) => setSourceLabel(event.target.value)}
+                placeholder="Poção, magia, decisão do mestre"
               />
             </label>
+            <label>
+              Ícone HTTPS (opcional)
+              <input
+                type="url"
+                value={iconUrl}
+                onChange={(event) => setIconUrl(event.target.value)}
+                placeholder="https://…"
+              />
+            </label>
+            {manager && (
+              <label>
+                Visibilidade
+                <select
+                  value={visibility}
+                  onChange={(event) => setVisibility(event.target.value as "public" | "gm")}
+                >
+                  <option value="public">Pública</option>
+                  <option value="gm">Somente mestre</option>
+                </select>
+              </label>
+            )}
           </div>
           <button
             className="primary"

@@ -4,6 +4,7 @@ import type { Tool } from "../store/session";
 import type { CanvasObjectKind } from "../lib/canvasObjects";
 import { publicAssetUrl } from "../lib/assets";
 import { isTargetGesture } from "../lib/targeting";
+import { actorConditions, CONDITION_LABELS } from "../lib/conditions";
 import {
   pointInAreaTemplate,
   segmentIntersectsSegment,
@@ -504,6 +505,19 @@ export class VttTable {
           color: pct > 0.5 ? 0x4fac7a : pct > 0.2 ? 0xd9a441 : 0xd94a5f,
         });
         c.addChild(bar);
+        const statuses = actorConditions(actor).slice(0, 4);
+        for (const [index, status] of statuses.entries()) {
+          const text = new Text({
+            text: CONDITION_LABELS[status]?.short ?? status.slice(0, 3).toUpperCase(),
+            style: { fill: 0xf1ece1, fontFamily: "Archivo", fontSize: 9, fontWeight: "700" },
+          });
+          const width = Math.max(26, text.width + 7);
+          const badge = new Graphics()
+            .roundRect(-radius + index * 30, radius + 3, width, 14, 3)
+            .fill({ color: 0x7b4c21, alpha: 0.96 });
+          text.position.set(-radius + index * 30 + 3, radius + 4);
+          c.addChild(badge, text);
+        }
       }
 
       const label = new Text({

@@ -13,6 +13,7 @@ use App\Models\ActorDocument;
 use App\Models\Scene;
 use App\Support\Dnd\ActiveEffectEngine;
 use App\Support\Dnd\CombatRules;
+use App\Support\Dnd\EffectAudit;
 use App\Support\Dnd\VitalityCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -364,7 +365,11 @@ class DamageController extends Controller
                 }
                 $system['hp'] = json_decode($operation->before, true);
                 if (isset($resolution['effectId'])) {
-                    ActiveEffect::query()->whereKey($resolution['effectId'])->where('actor_id', $actor->id)->delete();
+                    $effectToUndo = ActiveEffect::query()->whereKey($resolution['effectId'])->where('actor_id', $actor->id)->first();
+                    if ($effectToUndo) {
+                        EffectAudit::record($effectToUndo, 'removed', $effectToUndo->toArray(), $request->user()->id, 'damage-undo');
+                        $effectToUndo->delete();
+                    }
                 }
                 $resolution['undoneBy'] = $request->user()->id;
                 $resolution['undoneAt'] = now()->toIso8601String();
@@ -439,9 +444,16 @@ class DamageController extends Controller
                         'duration' => $effect['duration'],
                         'modifiers' => $effect['modifiers'] ?? [],
                         'conditions' => $effect['conditions'] ?? [],
+                        'source_label' => $message['label'] ?? 'Ação',
+                        'icon_url' => $effect['iconUrl'] ?? null,
+                        'visibility' => $message['visibility'] ?? 'public',
+                        'concentration_actor_id' => isset($message['concentrationId']) ? ($message['sourceActorId'] ?? null) : null,
+                        'concentration_id' => $message['concentrationId'] ?? null,
                         'metadata' => ['actionMessageId' => $messageId, 'sourceActorId' => $message['sourceActorId'] ?? null, 'createdBy' => $request->user()->id],
                         'active' => true,
                     ]);
+                    $this->effects->breakIfIncapacitating($existingEffect);
+                    EffectAudit::record($existingEffect, 'created', null, $request->user()->id, 'action:'.$messageId);
                 }
                 $resolution['effectId'] = $existingEffect->id;
                 $resolution['steps'][] = 'Efeito aplicado: '.$effect['name'];
@@ -634,7 +646,10 @@ class DamageController extends Controller
             }
             $actor->system = $system;
             $actor->save();
-            ActiveEffect::query()->where('metadata->actionMessageId', $messageId)->delete();
+            ActiveEffect::query()->where('metadata->actionMessageId', $messageId)->get()->each(function (ActiveEffect $effect) use ($request) {
+                EffectAudit::record($effect, 'removed', $effect->toArray(), $request->user()->id, 'action-undo');
+                $effect->delete();
+            });
             DB::table('action_records')->where('id', $record->id)->update(['undone' => true, 'updated_at' => now()]);
             broadcast(new SceneUpdated($scene, 'resolution'));
         }

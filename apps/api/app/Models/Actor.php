@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use App\Support\Dnd\ActiveEffectEngine;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 
 /**
@@ -59,6 +61,11 @@ class Actor extends Model
                 }
             }
         });
+        static::saved(function (Actor $actor) {
+            if ($actor->wasChanged('system')) {
+                app(ActiveEffectEngine::class)->reconcileConcentration($actor);
+            }
+        });
     }
 
     /** @return BelongsTo<Campaign, $this> */
@@ -95,8 +102,12 @@ class Actor extends Model
     {
         $system = $this->system;
         $viewer = auth()->user();
-        if ($viewer && ! $this->campaign->canManage($viewer)) {
+        $gm = $viewer && $this->campaign->canManage($viewer);
+        if ($viewer && ! $gm) {
             $system['actions'] = array_values(array_filter($system['actions'] ?? [], fn ($action) => ($action['visibility'] ?? 'public') !== 'gm'));
+            if (($system['concentration']['visibility'] ?? 'public') === 'gm') {
+                $system['concentration'] = null;
+            }
         }
         // Spell levels form a JSON dictionary, including when no slots exist.
         $system['spells']['slots'] = (object) ($system['spells']['slots'] ?? []);
@@ -113,7 +124,10 @@ class Actor extends Model
             'imgUrl' => $this->img_path ? url('storage/'.$this->img_path) : null,
             'system' => $system,
             'documents' => $this->relationLoaded('documents') ? $this->documents->values() : $this->documents()->get(),
-            'activeEffects' => $this->relationLoaded('activeEffects') ? $this->activeEffects->values() : $this->activeEffects()->get(),
+            'activeEffects' => ($this->relationLoaded('activeEffects') ? $this->activeEffects : $this->activeEffects()->get())
+                ->filter(fn (ActiveEffect $effect) => $gm || $effect->visibility !== 'gm')
+                ->map(fn (ActiveEffect $effect) => $gm ? $effect->toArray() : Arr::except($effect->toArray(),
+                    ['metadata', 'concentration_actor_id', 'concentration_id', 'source_document_id']))->values(),
         ];
     }
 }

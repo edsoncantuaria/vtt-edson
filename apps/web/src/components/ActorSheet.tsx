@@ -80,7 +80,11 @@ export function ActorSheet() {
       setBusy(false);
     }
   }
-  async function roll(formula: string, label: string) {
+  async function roll(
+    formula: string,
+    label: string,
+    ability?: "str" | "dex" | "con" | "int" | "wis" | "cha",
+  ) {
     if (!sceneId || !actor || !canEdit || busy) return;
     setBusy(true);
     const labelWithActor = `${actor.name} · ${label}`.slice(0, 80);
@@ -98,7 +102,7 @@ export function ActorSheet() {
             : label.includes("dano")
               ? "damage"
               : "ability";
-    const key = `${sceneId}:${actor.id}:${formula}:${labelWithActor}:${rollMode}`;
+    const key = `${sceneId}:${actor.id}:${formula}:${labelWithActor}:${rollMode}:${ability ?? ""}`;
     if (sheetRollRequest.current?.key !== key)
       sheetRollRequest.current = { key, id: crypto.randomUUID() };
     try {
@@ -107,6 +111,7 @@ export function ActorSheet() {
         actorId: actor.id,
         mode: rollMode,
         context,
+        ...(context === "save" && ability ? { ability } : {}),
       });
       sheetRollRequest.current = null;
     } catch (e) {
@@ -481,6 +486,7 @@ export function ActorSheet() {
             )
           ) : (
             <ActorQuickSheet
+              manager={isManagerRole(role)}
               actor={actor}
               ruleset={ruleset}
               canEdit={!!canEdit}

@@ -125,11 +125,13 @@ export const ActorActionSchema = z.object({
   concentration: z.boolean().optional(),
   effect: z.object({
     name: z.string().min(1).max(160),
+    iconUrl: z.string().url().refine((url) => url.startsWith('https://')).optional(),
     target: z.enum(['self', 'targets']).default('targets'),
     trigger: z.enum(['on-use','on-hit','on-failed-save']).default('on-use'),
     duration: z.object({
       unit: z.enum(['rounds','minutes','hours','until-short-rest','until-long-rest','permanent']),
       remaining: z.number().int().min(0).max(100000).optional(),
+      phase: z.enum(['round','start','end']).optional(),
     }),
     modifiers: z.array(z.object({ path: z.string(), mode: z.enum(['add','multiply','override']), value: z.union([z.number(), z.string().regex(/^\d*d\d+(?:[+-]\d+)?$/i)]) })).max(30).default([]),
     conditions: z.array(z.string().max(120)).max(20).default([]),
@@ -182,7 +184,13 @@ export const ActiveEffectSchema = z.object({
   duration: z.object({
     unit: z.enum(['rounds','minutes','hours','until-short-rest','until-long-rest','permanent']),
     remaining: z.number().int().min(0).nullable().optional(),
+    phase: z.enum(['round','start','end']).optional(),
   }),
+  source_label: z.string().nullable().optional(),
+  icon_url: z.string().url().nullable().optional(),
+  visibility: z.enum(['public','gm']).default('public'),
+  concentration_actor_id: z.number().nullable().optional(),
+  concentration_id: z.string().nullable().optional(),
   modifiers: z.array(z.object({ path: z.string(), mode: z.enum(['add','multiply','override']), value: z.union([z.number(), z.string().regex(/^\d*d\d+(?:[+-]\d+)?$/i)]) })).default([]),
   conditions: z.array(z.string()).default([]),
   metadata: z.record(z.string(), z.unknown()).default({}),
@@ -213,7 +221,7 @@ export const ActorSystemSchema = z.object({
     version: z.string().optional(),
   }).optional(),
   tokenImageUrl: z.string().optional(),
-  concentration: z.object({id:z.string(),name:z.string()}).nullable().optional(),
+  concentration: z.object({id:z.string(),name:z.string(),visibility:z.enum(['public','gm']).optional()}).nullable().optional(),
   damageTraits: z.object({resist:z.array(DamageTypeSchema).default([]),immune:z.array(DamageTypeSchema).default([]),vulnerable:z.array(DamageTypeSchema).default([])}).optional(),
   /** Explicit optional flat damage reduction, applied once after typed defenses. */
   damageReduction: z.number().int().min(0).max(100000).optional(),

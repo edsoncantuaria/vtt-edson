@@ -3,11 +3,13 @@ import { Icon } from "../Icon";
 import { ActorEffectsTab } from "./ActorEffectsTab";
 import { ActionsTab, AttributesTab, EquipmentTab, SpellsTab, StoryTab } from "./ActorSheetTabs";
 import { ACTOR_SHEET_TABS, type ActorSheetTab } from "./actorSheetTypes";
+import { actorConditions, conditionLabel } from "../../lib/conditions";
 
 export function ActorQuickSheet({
   actor,
   ruleset,
   canEdit,
+  manager = false,
   busy,
   amount,
   setAmount,
@@ -26,6 +28,7 @@ export function ActorQuickSheet({
   actor: Actor;
   ruleset: "5e-2014" | "5e-2024";
   canEdit: boolean;
+  manager?: boolean;
   busy: boolean;
   amount: number;
   setAmount: (value: number) => void;
@@ -199,6 +202,11 @@ export function ActorQuickSheet({
           </button>
         </div>
       )}
+      {!!actorConditions(actor).length && (
+        <div className="notice" aria-label="Condições atuais da ficha">
+          <strong>Condições:</strong> {actorConditions(actor).map(conditionLabel).join(" · ")}
+        </div>
+      )}
       <div className="sheet-tabs">
         {ACTOR_SHEET_TABS.map((item) => (
           <button aria-pressed={tab === item} onClick={() => setTab(item)} key={item}>
@@ -246,7 +254,7 @@ export function ActorQuickSheet({
           onEdit={onEdit}
         />
       )}
-      {tab === "Efeitos" && <ActorEffectsTab actor={actor} canEdit={canEdit} />}
+      {tab === "Efeitos" && <ActorEffectsTab actor={actor} canEdit={canEdit} manager={manager} />}
       {tab === "História" && <StoryTab actor={actor} canEdit={canEdit} onDelete={onDelete} />}
     </>
   );

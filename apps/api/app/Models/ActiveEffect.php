@@ -20,7 +20,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ActiveEffect extends Model
 {
-    protected $fillable = ['actor_id', 'source_document_id', 'name', 'duration', 'modifiers', 'conditions', 'metadata', 'active'];
+    protected $fillable = ['actor_id', 'source_document_id', 'name', 'duration', 'modifiers', 'conditions', 'metadata', 'active',
+        'visibility', 'icon_url', 'source_label', 'concentration_actor_id', 'concentration_id'];
 
     protected function casts(): array
     {

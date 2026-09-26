@@ -13,6 +13,8 @@ use App\Models\ActorDocument;
 use App\Models\Scene;
 use App\Support\Dnd\ActiveEffectEngine;
 use App\Support\Dnd\CombatRules;
+use App\Support\Dnd\ConditionRules;
+use App\Support\Dnd\EffectAudit;
 use App\Support\Dnd\HouseRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -120,7 +122,25 @@ final class SceneActionController extends Controller
         }
         $system = $actor->system;
         $effectiveSystem = $effects->effectiveSystem($actor);
+        abort_unless(ConditionRules::canAct($effectiveSystem), 422, 'A condição atual impede o personagem de executar ações.');
         $activeEffects = $actor->activeEffects()->get();
+        $targetSystemForAttack = null;
+        $distanceForAttack = null;
+        if (count($targetActorIds) === 1 && $targetActorIds[0] !== $actor->id) {
+            $targetForAttack = Actor::where('campaign_id', $scene->campaign_id)->find($targetActorIds[0]);
+            if ($targetForAttack) {
+                $targetSystemForAttack = $effects->effectiveSystem($targetForAttack);
+                $sceneTokens = collect($scene->state['tokens'] ?? []);
+                $originToken = $sceneTokens->first(fn ($token) => (int) ($token['actorId'] ?? 0) === $actor->id);
+                $targetToken = collect($targetTokensByActor[$targetForAttack->id] ?? [])->first()
+                    ?? $sceneTokens->first(fn ($token) => (int) ($token['actorId'] ?? 0) === $targetForAttack->id);
+                if ($originToken && $targetToken) {
+                    $distanceForAttack = hypot((float) $targetToken['x'] - (float) $originToken['x'],
+                        (float) $targetToken['y'] - (float) $originToken['y']) * 5 / max(1, (float) ($scene->state['grid']['size'] ?? 70));
+                }
+            }
+        }
+        $attackMode = ConditionRules::attackMode($effectiveSystem, $targetSystemForAttack, $data['mode'] ?? 'normal', $distanceForAttack);
         if ($attackFormula = CombatRules::attackFormula($effectiveSystem, $action)) {
             $action['attackFormula'] = $attackFormula;
         }
@@ -182,9 +202,9 @@ final class SceneActionController extends Controller
                 }
                 // Transform the d20 before optional effect dice (e.g. Bless +d4).
                 // RollLedger records the mode but must not apply it a second time.
-                if ($kind === 'attack' && ($data['mode'] ?? 'normal') !== 'normal') {
+                if ($kind === 'attack' && $attackMode['mode'] !== 'normal') {
                     abort_unless(preg_match('/^(?:1)?d20([+-]\d+)?$/i', $formula, $match), 422, 'Para escolher vantagem, use uma fórmula de ataque 1d20±K.');
-                    $formula = ($data['mode'] === 'advantage' ? '2d20kh1' : '2d20kl1').($match[1] ?? '');
+                    $formula = ($attackMode['mode'] === 'advantage' ? '2d20kh1' : '2d20kl1').($match[1] ?? '');
                 }
                 $adjusted = HouseRules::apply($formula, $action['name'].' · '.match ($kind) {
                     'attack' => 'Ataque', 'heal' => 'Cura', default => 'Dano'
@@ -198,8 +218,8 @@ final class SceneActionController extends Controller
                 }
                 $rolls[] = ['kind' => $kind, ...$ledger->roll($scene, $request->user(), [
                     'requestId' => $requestId, 'step' => $kind, 'context' => $kind,
-                    'actorId' => $actor->id, 'formula' => $formula, 'mode' => $kind === 'attack' ? ($data['mode'] ?? 'normal') : 'normal',
-                    'modePrepared' => $kind === 'attack' && ($data['mode'] ?? 'normal') !== 'normal',
+                    'actorId' => $actor->id, 'formula' => $formula, 'mode' => $kind === 'attack' ? $attackMode['mode'] : 'normal',
+                    'modePrepared' => $kind === 'attack' && $attackMode['mode'] !== 'normal',
                     'label' => $actor->name.' · '.$action['name'].' · '.$kind,
                     'houseRules' => $adjusted['rules'],
                     'visibility' => $action['visibility'] ?? 'public',
@@ -226,7 +246,8 @@ final class SceneActionController extends Controller
             $document->save();
         }
         if ($action['concentration'] ?? false) {
-            $system['concentration'] = ['id' => (string) Str::uuid(), 'name' => $action['name']];
+            $system['concentration'] = ['id' => (string) Str::uuid(), 'name' => $action['name'],
+                'visibility' => $action['visibility'] ?? 'public'];
         }
         $actor->system = $system;
         $actor->save();
@@ -251,6 +272,11 @@ final class SceneActionController extends Controller
                     'duration' => $effect['duration'],
                     'modifiers' => $effect['modifiers'] ?? [],
                     'conditions' => $effect['conditions'] ?? [],
+                    'source_label' => $actor->name.' · '.$action['name'],
+                    'icon_url' => $effect['iconUrl'] ?? null,
+                    'visibility' => $action['visibility'] ?? 'public',
+                    'concentration_actor_id' => ($action['concentration'] ?? false) ? $actor->id : null,
+                    'concentration_id' => ($action['concentration'] ?? false) ? ($system['concentration']['id'] ?? null) : null,
                     'metadata' => [
                         'actionMessageId' => $messageId,
                         'sourceActorId' => $actor->id,
@@ -259,6 +285,8 @@ final class SceneActionController extends Controller
                     'active' => true,
                 ]);
                 $effectIds[] = $createdEffect->id;
+                $effects->breakIfIncapacitating($createdEffect);
+                EffectAudit::record($createdEffect, 'created', null, $user->id, 'action:'.$messageId);
             }
         }
         $message = [
@@ -271,6 +299,7 @@ final class SceneActionController extends Controller
             'actionOrigin' => $action['origin'] ?? 'Ficha',
             'actionRevision' => $actionRevision,
             'sourceActorId' => $actor->id,
+            'concentrationId' => ($action['concentration'] ?? false) ? ($system['concentration']['id'] ?? null) : null,
             'damageType' => $action['damageType'] ?? null,
             'save' => isset($action['saveAbility']) ? ['ability' => $action['saveAbility'], 'dc' => CombatRules::saveDc($effectiveSystem, $action) + (int) round($effects->rollModifier($activeEffects, 'spell.saveDc')), 'effect' => $action['saveEffect']] : null,
             'houseRules' => array_values(array_unique($appliedRules)),

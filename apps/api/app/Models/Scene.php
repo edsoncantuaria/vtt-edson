@@ -112,6 +112,7 @@ class Scene extends Model
             return $message;
         }
         $readable ??= $this->readableActorIdsFor($user);
+        unset($message['concentrationId']);
         if (isset($message['sourceActorId']) && ! in_array($message['sourceActorId'], $readable, true)) {
             unset($message['sourceActorId']);
         }

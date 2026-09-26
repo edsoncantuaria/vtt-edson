@@ -6,6 +6,7 @@ export type RollOptions = {
   requestId?: string;
   actorId?: number;
   context?: RollRecord["context"];
+  ability?: "str" | "dex" | "con" | "int" | "wis" | "cha";
   mode?: RollRecord["mode"];
   visibility?: "public" | "gm";
   modifier?: number;
@@ -24,6 +25,7 @@ export function rollToChat(
     label,
     actorId: options.actorId,
     context: options.context ?? "custom",
+    ...(options.ability ? { ability: options.ability } : {}),
     mode: options.mode ?? "normal",
     visibility: options.visibility ?? "public",
     ...(options.modifier !== undefined ? { modifier: options.modifier } : {}),

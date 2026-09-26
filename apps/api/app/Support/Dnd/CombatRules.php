@@ -48,13 +48,15 @@ final class CombatRules
             'attackBonus' => ['sometimes', 'integer', 'between:-30,30'],
             'damageAbility' => ['sometimes', Rule::in([...self::ABILITIES, 'spellcasting', 'weapon'])],
             'damageBonus' => ['sometimes', 'integer', 'between:-30,30'],
-            'effect' => ['sometimes', 'array:name,target,trigger,duration,modifiers,conditions'],
+            'effect' => ['sometimes', 'array:name,target,trigger,duration,modifiers,conditions,iconUrl'],
             'effect.name' => ['required_with:effect', 'string', 'max:160'],
+            'effect.iconUrl' => ['sometimes', 'url', 'max:2048', 'starts_with:https://'],
             'effect.target' => ['required_with:effect', Rule::in(['self', 'targets'])],
             'effect.trigger' => ['sometimes', Rule::in(['on-use', 'on-hit', 'on-failed-save'])],
-            'effect.duration' => ['required_with:effect', 'array:unit,remaining'],
+            'effect.duration' => ['required_with:effect', 'array:unit,remaining,phase'],
             'effect.duration.unit' => ['required_with:effect.duration', Rule::in(['rounds', 'minutes', 'hours', 'until-short-rest', 'until-long-rest', 'permanent'])],
             'effect.duration.remaining' => ['nullable', 'integer', 'min:0', 'max:100000'],
+            'effect.duration.phase' => ['sometimes', 'in:round,start,end'],
             'effect.modifiers' => ['sometimes', 'array', 'max:30'],
             'effect.modifiers.*.path' => ['required', Rule::in(ActiveEffectEngine::modifierPaths())],
             'effect.modifiers.*.mode' => ['required', Rule::in(['add', 'multiply', 'override'])],
@@ -139,7 +141,8 @@ final class CombatRules
         $bonus = $system['saves'][$ability]['bonus'] ?? null;
         $bonus ??= self::abilityModifier($system, $ability) + (($system['saves'][$ability]['proficient'] ?? false) ? ($system['proficiencyBonus'] ?? 2) : 0);
         $bonus += $options['bonus'] ?? 0;
-        $mode = $options['mode'] ?? 'normal';
+        $conditionMode = ConditionRules::mode($system, 'save', $options['mode'] ?? 'normal', $ability);
+        $mode = $conditionMode['mode'];
         $formula = match ($mode) {
             'advantage' => '2d20kh1', 'disadvantage' => '2d20kl1', default => '1d20'
         };
@@ -147,7 +150,8 @@ final class CombatRules
         $effectiveFormula = $adjusted['formula'].($options['effectFormula'] ?? '');
         $roll = $persistRoll ? $persistRoll($effectiveFormula, $adjusted['rules'], $mode) : $dice->roll($effectiveFormula);
 
-        return ['ability' => $ability, 'dc' => $dc, 'success' => $roll['total'] >= $dc, 'roll' => $roll, 'houseRules' => $adjusted['rules'], 'mode' => $mode];
+        return ['ability' => $ability, 'dc' => $dc, 'success' => $roll['total'] >= $dc, 'roll' => $roll, 'houseRules' => $adjusted['rules'], 'mode' => $mode,
+            'conditionSources' => $conditionMode['sources']];
     }
 
     /** @return array{ac:int,total:int,critical:bool,fumble:bool,hit:bool}|null */

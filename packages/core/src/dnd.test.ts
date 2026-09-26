@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ActorActionSchema, ActorResourceSchema, ActorSystemSchema, abilityModifier, emptyActorSystem, formatModifier } from './dnd'
+import { ActiveEffectSchema, ActorActionSchema, ActorResourceSchema, ActorSystemSchema, abilityModifier, emptyActorSystem, formatModifier } from './dnd'
 
 describe('typed damage and optional fixed reduction', () => {
   it('retains typed components on action and character schemas without breaking legacy actions', () => {
@@ -13,6 +13,19 @@ describe('typed damage and optional fixed reduction', () => {
     expect(ActorSystemSchema.parse(system).damageReduction).toBe(3)
     expect(ActorActionSchema.safeParse({ ...mixed, damageParts: [{ formula: '1d6', damageType: 'invalid' }] }).success).toBe(false)
     expect(ActorSystemSchema.safeParse({ ...system, damageReduction: -1 }).success).toBe(false)
+  })
+})
+
+describe('effect lifecycle contract', () => {
+  it('parses optional provenance, privacy, icon, turn phase and concentration without breaking old effects', () => {
+    const base = { id: 1, actor_id: 2, name: 'Poison', duration: { unit: 'rounds' as const, remaining: 2 },
+      modifiers: [], conditions: ['poisoned'], metadata: {}, active: true }
+    expect(ActiveEffectSchema.parse(base).visibility).toBe('public')
+    const effect = ActiveEffectSchema.parse({ ...base, duration: { ...base.duration, phase: 'start' },
+      source_label: 'Potion', icon_url: 'https://example.com/potion.png', visibility: 'gm',
+      concentration_actor_id: 5, concentration_id: 'cast-1' })
+    expect(effect.duration.phase).toBe('start')
+    expect(effect.visibility).toBe('gm')
   })
 })
 

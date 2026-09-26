@@ -14,6 +14,7 @@ use App\Support\Dnd\AbilityScore;
 use App\Support\Dnd\ActiveEffectEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -145,24 +146,30 @@ class CombatController extends Controller
     public function next(Request $request, Scene $scene): JsonResponse
     {
         $this->requireGm($request, $scene);
-        $combat = $this->activeCombat($scene);
-        if (! $combat) {
-            abort(404, 'Nenhum combate ativo nesta cena.');
-        }
 
-        $count = $combat->participants()->count();
-        if ($count > 0) {
-            $nextTurn = $combat->turn + 1;
-            if ($nextTurn >= $count) {
-                $nextTurn = 0;
-                $combat->round++;
-                $this->effects->advanceRound($combat);
+        return DB::transaction(function () use ($scene) {
+            $combat = Combat::where('scene_id', $scene->id)->where('is_active', true)->latest('id')->lockForUpdate()->first();
+            if (! $combat) {
+                abort(404, 'Nenhum combate ativo nesta cena.');
             }
-            $combat->turn = $nextTurn;
-            $combat->save();
-        }
 
-        return $this->respond($scene, $combat);
+            $participants = $combat->participants()->get()->values();
+            $count = $participants->count();
+            if ($count > 0) {
+                $this->effects->advanceTurn($combat, $participants->get($combat->turn)?->actor_id, 'end');
+                $nextTurn = $combat->turn + 1;
+                if ($nextTurn >= $count) {
+                    $nextTurn = 0;
+                    $combat->round++;
+                    $this->effects->advanceRound($combat);
+                }
+                $combat->turn = $nextTurn;
+                $combat->save();
+                $this->effects->advanceTurn($combat, $participants->get($nextTurn)?->actor_id, 'start');
+            }
+
+            return $this->respond($scene, $combat);
+        });
     }
 
     public function prev(Request $request, Scene $scene): JsonResponse

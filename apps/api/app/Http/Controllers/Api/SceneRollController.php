@@ -10,6 +10,8 @@ use App\Models\Actor;
 use App\Models\CampaignResourcePermission;
 use App\Models\Scene;
 use App\Models\User;
+use App\Support\Dnd\ActiveEffectEngine;
+use App\Support\Dnd\ConditionRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -65,6 +67,7 @@ final class SceneRollController extends Controller
             'requestId' => ['required', 'uuid'], 'formula' => ['required', 'string', 'max:120'],
             'actorId' => ['nullable', 'integer', Rule::exists('actors', 'id')->where('campaign_id', $scene->campaign_id)],
             'context' => ['sometimes', 'in:custom,ability,skill,save,initiative,attack,damage,heal,concentration'],
+            'ability' => ['sometimes', Rule::in(['str', 'dex', 'con', 'int', 'wis', 'cha'])],
             'mode' => ['sometimes', 'in:normal,advantage,disadvantage'],
             'modifier' => ['sometimes', 'integer', 'between:-100,100'],
             'extraDice' => ['sometimes', 'string', 'max:20'],
@@ -73,10 +76,19 @@ final class SceneRollController extends Controller
             'label' => ['nullable', 'string', 'max:80'],
         ]);
         $user = $request->user();
+        $actor = null;
         if (isset($data['actorId'])) {
             $actor = Actor::where('campaign_id', $scene->campaign_id)->findOrFail($data['actorId']);
             abort_unless($member->isGm() || $actor->isOwnedBy($user)
                 || CampaignResourcePermission::permits($scene->campaign, $user, 'actor', $actor->id, 'edit'), 403);
+        }
+        $context = $data['context'] ?? 'custom';
+        if ($actor && in_array($context, ['attack', 'ability', 'skill', 'save'], true)) {
+            $effective = app(ActiveEffectEngine::class)->effectiveSystem($actor);
+            abort_if($context === 'attack' && ! ConditionRules::canAct($effective), 422, 'A condição atual impede este ataque.');
+            $conditions = ConditionRules::mode($effective, $context,
+                $data['mode'] ?? 'normal', $data['ability'] ?? null);
+            $data['mode'] = $conditions['mode'];
         }
         if (($data['visibility'] ?? 'public') === 'private') {
             abort_unless($scene->memberFor(User::findOrFail($data['recipientUserId'])) !== null, 422, 'Destinatário não participa da cena.');
