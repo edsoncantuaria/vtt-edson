@@ -159,6 +159,8 @@ class ActionPipelineTest extends TestCase
         $this->getJson($path.'?actorId='.$target->id)->assertOk()->assertJsonPath('preview.hit', true)->assertJsonPath('preview.damage', 0);
         $this->postJson($path, ['actorId' => $target->id])->assertOk();
         $this->assertDatabaseHas('active_effects', ['actor_id' => $target->id, 'name' => 'Marked']);
+        $this->postJson($path, ['actorId' => $target->id, 'correct' => true, 'requestId' => (string) Str::uuid(),
+            'damageOverride' => 0, 'reason' => 'Condição já aplicada'])->assertStatus(409);
         $this->postJson($path, ['actorId' => $target->id])->assertOk();
         $this->assertSame(1, ActiveEffect::where('actor_id', $target->id)->count());
         $this->postJson($path, ['actorId' => $target->id, 'undo' => true])->assertOk();

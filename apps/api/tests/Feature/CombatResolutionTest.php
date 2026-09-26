@@ -65,7 +65,8 @@ class CombatResolutionTest extends TestCase
         // No stat block or saving throw payload is broadcast into public chat.
         $chat = Scene::findOrFail($room['scene']['id'])->state['chat'];
         $this->assertArrayNotHasKey('saves', $chat[0]);
-        $this->assertCount(1, $chat);
+        $this->assertCount(3, $chat);
+        $this->assertStringNotContainsString('CA ', $chat[1]['text']);
         $outsider = User::factory()->create();
         Sanctum::actingAs($outsider);
         $this->postJson('/api/rooms/join', ['code' => $room['room']['code']])->assertOk();
@@ -90,7 +91,7 @@ class CombatResolutionTest extends TestCase
         $this->postJson($path, ['actorId' => $caster['id']])->assertOk()->assertJsonPath('actor.system.spells.slots.1.used', 0)->assertJsonPath('actor.system.concentration', null);
         $this->postJson($path, ['actorId' => $caster['id']])->assertJsonPath('actor.system.spells.slots.1.used', 0);
         $this->postJson($base.'/actions', $data)->assertJsonPath('actor.system.spells.slots.1.used', 0);
-        $this->postJson($base.'/damage/'.$message['id'], ['actorId' => $caster['id'], 'factor' => 1])->assertStatus(409);
+        $this->postJson($base.'/damage/'.$message['id'], ['actorId' => $caster['id'], 'factor' => 1, 'reason' => 'Teste de retry'])->assertStatus(409);
     }
 
     public function test_generic_action_resource_is_consumed_once_and_undo_restores_it(): void
@@ -163,7 +164,9 @@ class CombatResolutionTest extends TestCase
         $actor->update(['system' => $system]);
         $path = $base.'/damage/'.$message;
         $data = ['actorId' => $actor->id];
-        $this->postJson($path, [...$data, 'factor' => 1])->assertOk()->assertJsonPath('actor.system.hp.value', 50);
+        $this->postJson($path, [...$data, 'factor' => 1, 'reason' => 'Aplicar dano bruto para testar concentração'])->assertOk()->assertJsonPath('actor.system.hp.value', 50);
+        $this->postJson($path, [...$data, 'correct' => true, 'requestId' => (string) Str::uuid(),
+            'damageOverride' => 9, 'reason' => 'A concentração depende deste dano'])->assertStatus(409);
         $this->getJson($path.'?actorId='.$actor->id)->assertJsonPath('application.resolution.concentrationDc', 30);
         $save = $this->postJson($path.'/concentration', $data)->assertOk()->assertJsonPath('save.success', false)->assertJsonPath('actor.system.concentration', null)->json('save');
         $this->postJson($path.'/concentration', $data)->assertJsonPath('save', $save);

@@ -32,6 +32,8 @@ class CombatRulesTest extends TestCase
     {
         $this->assertSame('4d6+3', CombatRules::criticalFormula('2d6+3'));
         $this->assertSame('2d8-2', CombatRules::criticalFormula('d8-2'));
+        $this->assertSame('2d8+4d6+2d4+3', CombatRules::criticalFormula('d8+2d6+d4+3'));
+        $this->assertSame('4d6-2d4+2', CombatRules::criticalFormula('2d6-d4+2'));
         $this->assertSame(10, CombatRules::concentrationDc(19, '5e-2014'));
         $this->assertSame(40, CombatRules::concentrationDc(81, '5e-2014'));
         $this->assertSame(30, CombatRules::concentrationDc(81, '5e-2024'));
@@ -62,9 +64,32 @@ class CombatRulesTest extends TestCase
 
         $result = CombatRules::damage($message, ['ac' => 15], null);
 
-        $this->assertSame(['ac' => 15, 'total' => 14, 'critical' => false, 'fumble' => false, 'hit' => false], $result['attack']);
+        $this->assertSame(['ac' => 15, 'total' => 14, 'critical' => false, 'fumble' => false, 'hit' => false, 'automaticHit' => false], $result['attack']);
         $this->assertFalse($result['hit']);
         $this->assertFalse($result['pendingSave']);
         $this->assertSame(0, $result['damage']);
+    }
+
+    public function test_gm_hit_decision_preserves_original_roll_and_applies_exacted_damage(): void
+    {
+        $message = ['rolls' => [
+            ['kind' => 'attack', 'total' => 11, 'critical' => false, 'fumble' => false],
+            ['kind' => 'damage', 'total' => 9],
+        ], 'damageType' => 'slashing'];
+        $system = ['ac' => 18, 'damageTraits' => ['immune' => ['slashing']]];
+        $automatic = CombatRules::damage($message, $system, null);
+        $this->assertSame(0, $automatic['damage']);
+        $this->assertFalse($automatic['attack']['hit']);
+        $corrected = CombatRules::damage($message, $system, null, null, 'hit', 7);
+        $this->assertSame(7, $corrected['damage']);
+        $this->assertSame(11, $corrected['attack']['total']);
+        $this->assertFalse($corrected['attack']['automaticHit']);
+        $this->assertTrue($corrected['attack']['hit']);
+        $this->assertSame('hit', $corrected['hitDecision']);
+        $this->assertTrue($corrected['manual']);
+        $miss = CombatRules::damage($message, ['ac' => 1], null, null, 'miss');
+        $this->assertSame(0, $miss['damage']);
+        $this->assertTrue($miss['attack']['automaticHit']);
+        $this->assertFalse($miss['hit']);
     }
 }

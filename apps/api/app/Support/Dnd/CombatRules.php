@@ -168,16 +168,31 @@ final class CombatRules
         ];
     }
 
-    public static function damage(array $message, array $system, ?array $save, ?float $override = null): array
+    public static function damage(array $message, array $system, ?array $save, ?float $override = null, string $hitDecision = 'auto', ?int $damageOverride = null): array
     {
+        abort_unless(in_array($hitDecision, ['auto', 'hit', 'miss'], true), 422, 'Decisão de ataque inválida.');
         $roll = collect($message['rolls'] ?? [])->firstWhere('kind', 'damage');
         abort_unless($roll, 422, 'Esta ação não contém dano.');
         $amount = max(0, (int) $roll['total']);
         $steps = ['Dano rolado: '.$amount];
         $attack = self::attack($message, $system);
+        abort_if($hitDecision !== 'auto' && $attack === null, 422, 'Esta ação não possui uma rolagem de ataque.');
+        if ($attack) {
+            $attack['automaticHit'] = $attack['hit'];
+            if ($hitDecision !== 'auto') {
+                $attack['hit'] = $hitDecision === 'hit';
+                $steps[] = 'Decisão do mestre: '.($attack['hit'] ? 'acerto' : 'erro').' (resultado original preservado)';
+            }
+        }
         $hit = $attack['hit'] ?? null;
+        abort_if($hitDecision === 'miss' && $override !== null && $override > 0, 422, 'Um erro decidido não pode aplicar dano positivo.');
         $pending = isset($message['save']) && $save === null && $hit !== false;
-        if ($override !== null) {
+        if ($damageOverride !== null) {
+            abort_unless($damageOverride >= 0 && $damageOverride <= 100000, 422, 'Dano corrigido fora do limite.');
+            abort_if($hitDecision === 'miss' && $damageOverride > 0, 422, 'Um erro decidido não pode aplicar dano positivo.');
+            $amount = $damageOverride;
+            $steps[] = 'Dano fixado pelo mestre: '.$amount.' (substitui salvaguarda, acerto e defesas)';
+        } elseif ($override !== null) {
             $amount = max(0, (int) floor($amount * $override));
             $steps[] = 'Decisão manual: ×'.$override.' (substitui salvaguarda, acerto e defesas)';
         } else {
@@ -210,7 +225,7 @@ final class CombatRules
             }
         }
 
-        return ['damage' => $amount, 'steps' => $steps, 'hit' => $hit, 'attack' => $attack, 'pendingSave' => $pending && $override === null, 'manual' => $override !== null];
+        return ['damage' => $amount, 'steps' => $steps, 'hit' => $hit, 'attack' => $attack, 'hitDecision' => $hitDecision, 'pendingSave' => $pending && $override === null && $damageOverride === null, 'manual' => $override !== null || $damageOverride !== null || $hitDecision !== 'auto'];
     }
 
     public static function concentrationDc(int $damage, string $ruleset): int
@@ -222,8 +237,10 @@ final class CombatRules
 
     public static function criticalFormula(string $formula): string
     {
-        abort_unless(preg_match('/^(\d*)d(\d+)([+-]\d+)?$/i', trim($formula), $m), 422, 'Revise a fórmula de dano crítico; use NdM±K.');
+        $formula = preg_replace('/\s+/', '', trim($formula));
+        abort_unless(preg_match('/^[+-]?\d*d\d+(?:[+-](?:\d*d\d+|\d+))*$/i', $formula), 422, 'Revise a fórmula de dano crítico; use somas de dados e modificadores.');
 
-        return ((int) ($m[1] !== '' ? $m[1] : 1) * 2).'d'.$m[2].($m[3] ?? '');
+        // 5e (2014/2024): double each damage die, never a flat modifier.
+        return preg_replace_callback('/(\d*)d(\d+)/i', fn ($m) => (2 * (int) ($m[1] === '' ? 1 : $m[1])).'d'.$m[2], $formula);
     }
 }

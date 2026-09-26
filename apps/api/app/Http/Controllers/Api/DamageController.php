@@ -15,6 +15,7 @@ use App\Support\Dnd\ActiveEffectEngine;
 use App\Support\Dnd\CombatRules;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 class DamageController extends Controller
@@ -76,7 +77,7 @@ class DamageController extends Controller
         $hasDamage = collect($message['rolls'] ?? [])->contains('kind', 'damage');
         $effect = $message['effect'] ?? null;
         $needsResolution = $hasDamage || isset($message['save']) || (is_array($effect) && in_array($effect['trigger'] ?? 'on-use', ['on-hit', 'on-failed-save'], true));
-        if ($message['targetMode'] ?? null) {
+        if (! empty($message['targetActorIds'])) {
             abort_unless(in_array($actor->id, $message['targetActorIds'] ?? [], true), 422, 'Este ator não pertence aos alvos confirmados da ação.');
         }
         $attack = $needsResolution && ! $hasDamage ? CombatRules::attack($message, $this->effects->effectiveSystem($actor)) : null;
@@ -164,17 +165,44 @@ class DamageController extends Controller
         $actor = $this->target($request, $scene);
         $data = $request->validate([
             'factor' => ['sometimes', 'in:0,0.5,1,2'],
+            'hitDecision' => ['sometimes', 'in:auto,hit,miss'],
+            'damageOverride' => ['sometimes', 'integer', 'between:0,100000'],
+            'correct' => ['sometimes', 'boolean'],
+            'requestId' => ['required_if:correct,true', 'uuid'],
             'undo' => ['sometimes', 'boolean'],
             'reason' => ['sometimes', 'string', 'max:240'],
         ]);
+        $override = isset($data['factor']) || isset($data['damageOverride']) || in_array($data['hitDecision'] ?? 'auto', ['hit', 'miss'], true);
+        abort_if(isset($data['factor'], $data['damageOverride']), 422, 'Escolha um único tipo de correção do dano.');
+        if ($override && ! ($data['undo'] ?? false)) {
+            abort_unless($scene->campaign->canManage($request->user()), 403, 'Somente o mestre pode corrigir acertos e dano.');
+            abort_unless(trim($data['reason'] ?? '') !== '', 422, 'Informe o motivo da correção.');
+        }
         $key = $this->key($scene, $actor, $messageId);
         $operation = DB::table('damage_applications')->where($key)->first();
+        if ($data['correct'] ?? false) {
+            return $this->correctLocked($request, $scene, $messageId, $actor, $operation, $data);
+        }
+        if ($operation && ! $operation->undone && ! ($data['undo'] ?? false) && $override) {
+            $prior = json_decode($operation->resolution ?? '{}', true);
+            abort_if(
+                (isset($data['factor']) ? (float) $data['factor'] : null) !== (isset($prior['factor']) ? (float) $prior['factor'] : null)
+                || ($data['damageOverride'] ?? null) !== ($prior['damageOverride'] ?? null)
+                || ($data['hitDecision'] ?? 'auto') !== ($prior['hitDecision'] ?? 'auto')
+                || ($data['reason'] ?? null) !== ($prior['reason'] ?? null),
+                409, 'Este dano já foi confirmado com outra decisão; não é possível sobrescrever a resolução.');
+        }
         $system = $actor->system;
         if ($data['undo'] ?? false) {
             abort_unless($operation !== null, 404);
             if (! $operation->undone) {
+                [$originalMessage] = $this->source($request, $scene, $messageId);
                 $resolution = json_decode($operation->resolution ?? '{}', true);
                 abort_unless(($system['hp'] ?? []) == json_decode($operation->after, true), 409, 'Os PV mudaram depois deste dano. Ajuste a ficha manualmente.');
+                abort_if($actor->type === 'character' && (int) ($system['hp']['value'] ?? -1) === 0
+                    && (((int) ($system['deathSaves']['success'] ?? 0) > 0) || ((int) ($system['deathSaves']['failure'] ?? 0) > 0)
+                        || array_intersect($system['conditions'] ?? [], ['morto', 'estabilizado', 'dead', 'stabilized'])),
+                    409, 'Já houve salvaguardas contra morte; não é seguro desfazer este dano automaticamente.');
                 if (array_key_exists('concentrationAfter', $resolution)) {
                     abort_unless(($system['concentration'] ?? null) == $resolution['concentrationAfter'], 409, 'A concentração mudou depois deste dano.');
                     $system['concentration'] = $resolution['concentrationBefore'];
@@ -186,10 +214,11 @@ class DamageController extends Controller
                 $resolution['undoneBy'] = $request->user()->id;
                 $resolution['undoneAt'] = now()->toIso8601String();
                 DB::table('damage_applications')->where($key)->update(['undone' => true, 'resolution' => json_encode($resolution)]);
+                $this->resolutionChat($scene, $request, $originalMessage, $resolution, true);
             }
         } elseif (! $operation) {
             [$message, $record] = $this->source($request, $scene, $messageId);
-            if ($message['targetMode'] ?? null) {
+            if (! empty($message['targetActorIds'])) {
                 abort_unless(in_array($actor->id, $message['targetActorIds'] ?? [], true), 422, 'Este ator não pertence aos alvos confirmados da ação.');
             }
             abort_if($record?->undone, 409, 'Esta ação foi desfeita.');
@@ -197,12 +226,21 @@ class DamageController extends Controller
             $effectiveSystem = $this->effects->apply($system, $actor->activeEffects()->get());
             $hasDamage = collect($message['rolls'] ?? [])->contains('kind', 'damage');
             if ($hasDamage) {
-                $resolution = CombatRules::damage($message, $effectiveSystem, $save, isset($data['factor']) ? (float) $data['factor'] : null);
+                $resolution = CombatRules::damage($message, $effectiveSystem, $save, isset($data['factor']) ? (float) $data['factor'] : null,
+                    $data['hitDecision'] ?? 'auto', $data['damageOverride'] ?? null);
             } else {
                 $attack = CombatRules::attack($message, $effectiveSystem);
+                abort_if(($data['hitDecision'] ?? 'auto') !== 'auto' && ! $attack, 422, 'Esta ação não tem ataque.');
+                if ($attack) {
+                    $attack['automaticHit'] = $attack['hit'];
+                    if (($data['hitDecision'] ?? 'auto') !== 'auto') {
+                        $attack['hit'] = $data['hitDecision'] === 'hit';
+                    }
+                }
+                abort_if(isset($data['damageOverride']) && $data['damageOverride'] > 0, 422, 'Esta ação não rolou dano.');
                 $resolution = [
-                    'damage' => 0, 'steps' => ['Ação sem dano direto'], 'hit' => $attack['hit'] ?? null, 'attack' => $attack,
-                    'pendingSave' => isset($message['save']) && $save === null, 'manual' => isset($data['factor']),
+                    'damage' => 0, 'steps' => ['Ação sem dano direto', ...(($data['hitDecision'] ?? 'auto') !== 'auto' ? ['Acerto corrigido pelo mestre'] : [])], 'hit' => $attack['hit'] ?? null, 'attack' => $attack,
+                    'hitDecision' => $data['hitDecision'] ?? 'auto', 'pendingSave' => isset($message['save']) && $save === null, 'manual' => $override,
                 ];
             }
             abort_if($resolution['pendingSave'], 422, 'Resolva a salvaguarda ou escolha uma decisão manual.');
@@ -225,6 +263,8 @@ class DamageController extends Controller
             $resolution['userId'] = $request->user()->id;
             $resolution['createdAt'] = now()->toIso8601String();
             $resolution['reason'] = $data['reason'] ?? null;
+            $resolution['factor'] = isset($data['factor']) ? (float) $data['factor'] : null;
+            $resolution['damageOverride'] = $data['damageOverride'] ?? null;
             $resolution['save'] = $save;
             $effect = is_array($message['effect'] ?? null) ? $message['effect'] : null;
             $trigger = $effect['trigger'] ?? 'on-use';
@@ -250,12 +290,113 @@ class DamageController extends Controller
                 $resolution['steps'][] = 'Efeito aplicado: '.$effect['name'];
             }
             DB::table('damage_applications')->insert([...$key, 'before' => json_encode($before), 'after' => json_encode($system['hp']), 'resolution' => json_encode($resolution), 'undone' => false]);
+            $this->resolutionChat($scene, $request, $message, $resolution, false);
         }
         $actor->system = $system;
         $actor->save();
         broadcast(new SceneUpdated($scene, 'resolution'));
 
         return response()->json(['actor' => $actor->toPayload(), 'undone' => (bool) ($data['undo'] ?? $operation->undone ?? false)]);
+    }
+
+    /** A separate, explicit correction of a finalized damage-only attack. Previous decisions remain in the ledger. */
+    private function correctLocked(Request $request, Scene $scene, string $messageId, Actor $actor, ?object $operation, array $data)
+    {
+        abort_unless($scene->campaign->canManage($request->user()), 403);
+        abort_unless($operation && ! $operation->undone, 422, 'Confirme a aplicação original antes de corrigir.');
+        abort_unless(isset($data['damageOverride']), 422, 'Informe o dano corrigido.');
+        abort_unless(! ($data['undo'] ?? false) && ! isset($data['factor']), 422, 'Correção não pode ser combinada com desfazer ou fator.');
+        [$message, $record] = $this->source($request, $scene, $messageId);
+        abort_if($record?->undone, 409, 'A ação original foi desfeita.');
+        $resolution = json_decode($operation->resolution ?? '{}', true);
+        $corrections = $resolution['corrections'] ?? [];
+        $decision = $data['hitDecision'] ?? $resolution['hitDecision'] ?? 'auto';
+        $reason = trim($data['reason'] ?? '');
+        $hash = hash('sha256', json_encode([(int) $data['damageOverride'], $decision, $reason], JSON_THROW_ON_ERROR));
+        foreach ($corrections as $correction) {
+            if ($correction['requestId'] === $data['requestId']) {
+                abort_unless(hash_equals($correction['hash'], $hash), 409, 'A chave já foi usada para outra correção.');
+
+                return response()->json(['actor' => $actor->toPayload(), 'corrected' => true, 'replayed' => true]);
+            }
+        }
+        abort_unless(count($corrections) < 20, 422, 'Limite de correções desta ação atingido.');
+        // Recalculating an effect, resolved save or concentration would affect other
+        // gameplay entities. Do not silently rewrite them after confirmation.
+        abort_if(isset($message['save']) || isset($resolution['effectId'])
+            || ($resolution['concentrationBefore'] ?? null) !== null
+            || in_array($message['effect']['trigger'] ?? 'on-use', ['on-hit', 'on-failed-save'], true),
+            409, 'Esta resolução possui efeito, salvaguarda ou concentração; não pode ser corrigida isoladamente.');
+        abort_unless(collect($message['rolls'] ?? [])->contains('kind', 'damage'), 422, 'Esta ação não possui rolagem de dano para corrigir.');
+        $after = json_decode($operation->after, true);
+        abort_unless(($actor->system['hp'] ?? null) == $after, 409, 'Os PV mudaram depois desta ação; revisão manual necessária.');
+        $attack = $resolution['attack'] ?? null;
+        abort_if($decision !== 'auto' && ! $attack, 422, 'Esta ação não possui ataque.');
+        $automaticHit = $attack['automaticHit'] ?? $attack['hit'] ?? null;
+        $hit = $decision === 'auto' ? $automaticHit : $decision === 'hit';
+        abort_if($decision === 'miss' && (int) $data['damageOverride'] > 0, 422, 'Um erro decidido não pode aplicar dano positivo.');
+        $before = json_decode($operation->before, true);
+        $amount = (int) $data['damageOverride'];
+        $absorbed = min(max(0, (int) ($before['temp'] ?? 0)), $amount);
+        $corrected = $before;
+        $corrected['temp'] = max(0, (int) ($before['temp'] ?? 0) - $absorbed);
+        $corrected['value'] = max(0, (int) $before['value'] - ($amount - $absorbed));
+        $current = $actor->system;
+        abort_if($actor->type === 'character' && (int) ($after['value'] ?? -1) === 0 && $corrected['value'] > 0
+            && (((int) ($current['deathSaves']['success'] ?? 0) > 0) || ((int) ($current['deathSaves']['failure'] ?? 0) > 0)
+                || array_intersect($current['conditions'] ?? [], ['morto', 'estabilizado', 'dead', 'stabilized'])),
+            409, 'Já houve desfecho ou salvaguardas contra morte; revise a ficha antes de corrigir um golpe letal.');
+        $corrections[] = [
+            'requestId' => $data['requestId'], 'hash' => $hash,
+            'previousDamage' => $resolution['damage'], 'damage' => $amount,
+            'previousHit' => $resolution['hit'] ?? null, 'hit' => $hit,
+            'reason' => $reason, 'userId' => $request->user()->id, 'createdAt' => now()->toIso8601String(),
+        ];
+        $resolution['corrections'] = $corrections;
+        $resolution['damage'] = $amount;
+        $resolution['damageOverride'] = $amount;
+        $resolution['hitDecision'] = $decision;
+        $resolution['hit'] = $hit;
+        if ($attack) {
+            $attack['automaticHit'] = $automaticHit;
+            $attack['hit'] = $hit;
+            $resolution['attack'] = $attack;
+        }
+        $resolution['manual'] = true;
+        $resolution['reason'] = $reason;
+        $resolution['steps'][] = 'Correção posterior do mestre: '.$amount.' PV (sem alterar rolagem original)';
+        $system = $current;
+        $system['hp'] = $corrected;
+        $actor->system = $system;
+        $actor->save();
+        DB::table('damage_applications')->where('id', $operation->id)->update([
+            'after' => json_encode($corrected, JSON_THROW_ON_ERROR),
+            'resolution' => json_encode($resolution, JSON_THROW_ON_ERROR),
+        ]);
+        $this->resolutionChat($scene, $request, $message, $resolution, false, true);
+        broadcast(new SceneUpdated($scene, 'resolution'));
+
+        return response()->json(['actor' => $actor->toPayload(), 'corrected' => true, 'replayed' => false]);
+    }
+
+    /** Public result deliberately does not disclose a private target's CA or remaining PV. */
+    private function resolutionChat(Scene $scene, Request $request, array $message, array $resolution, bool $undo, bool $correction = false): void
+    {
+        $verdict = ($resolution['hit'] ?? null) === true ? 'Acerto' : (($resolution['hit'] ?? null) === false ? 'Erro' : 'Ação resolvida');
+        $text = $undo
+            ? 'Correção: dano/efeito da ação desfeito.'
+            : ($correction ? 'Correção posterior do mestre · ' : '').$verdict.' · '.(int) ($resolution['damage'] ?? 0).' PV de dano confirmados.'
+                .(! empty($resolution['manual']) ? ' Ajuste do mestre registrado.' : '');
+        $state = $scene->state;
+        $state['chat'][] = [
+            'id' => (string) Str::uuid(), 'userId' => $request->user()->id,
+            'userName' => $request->user()->name, 'type' => 'text',
+            'visibility' => $message['visibility'] ?? 'public',
+            'text' => $text, 'createdAt' => now()->toIso8601String(),
+        ];
+        $state['chat'] = array_slice($state['chat'], -200);
+        $scene->state = $state;
+        $scene->save();
     }
 
     public function concentration(Request $request, Scene $scene, string $messageId, DiceRoller $dice, RollLedger $ledger)

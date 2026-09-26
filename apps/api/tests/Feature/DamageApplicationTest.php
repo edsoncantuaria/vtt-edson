@@ -28,7 +28,7 @@ class DamageApplicationTest extends TestCase
         $scene->update(['state' => $state]);
         DB::table('action_records')->where('message_id', $message)->update(['message' => json_encode($state['chat'][0])]);
         $path = $base.'/damage/'.$message;
-        $data = ['actorId' => $actor['id'], 'factor' => 1];
+        $data = ['actorId' => $actor['id'], 'factor' => 1, 'reason' => 'Aplicação integral confirmada pelo mestre'];
         $this->postJson($path, $data)->assertOk()->assertJsonPath('actor.system.hp.value', 13)->assertJsonPath('actor.system.hp.temp', 0);
         $this->postJson($path, $data)->assertOk()->assertJsonPath('actor.system.hp.value', 13);
         $model = Actor::findOrFail($actor['id']);

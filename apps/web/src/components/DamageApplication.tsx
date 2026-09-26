@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ABILITY_LABELS, type Actor, type ChatMessage } from "@vtt/core";
 import { api } from "../lib/api";
 import { isManagerRole, useSession } from "../store/session";
+import { resolutionTargets } from "../lib/resolutionTargets";
 
 type SaveResult = {
   success: boolean;
@@ -10,7 +11,14 @@ type SaveResult = {
   reason?: string;
   houseRules?: string[];
 };
-type AttackResult = { ac: number; total: number; critical: boolean; fumble: boolean; hit: boolean };
+type AttackResult = {
+  ac: number;
+  total: number;
+  critical: boolean;
+  fumble: boolean;
+  hit: boolean;
+  automaticHit?: boolean;
+};
 type Resolution = {
   damage: number;
   steps: string[];
@@ -19,6 +27,17 @@ type Resolution = {
   concentrationSave?: SaveResult;
   createdAt?: string;
   reason?: string;
+  hitDecision?: "auto" | "hit" | "miss";
+  damageOverride?: number | null;
+  manual?: boolean;
+  corrections?: Array<{
+    requestId: string;
+    previousDamage: number;
+    damage: number;
+    reason: string;
+    userId: number;
+    createdAt: string;
+  }>;
 };
 type TargetResult = {
   preview: (Resolution & { hit: boolean | null; pendingSave: boolean }) | null;
@@ -52,8 +71,15 @@ function SaveOutcome({ result }: { result: SaveResult }) {
 
 export function DamageApplication({ message }: { message: ChatMessage }) {
   const { actors, role, user, sceneId, upsertActor, setError, targetActorIds } = useSession();
+  const lastChatId = useSession((session) => session.state.chat.at(-1)?.id);
   const [target, setTarget] = useState("");
   const [factor, setFactor] = useState("auto");
+  const [hitDecision, setHitDecision] = useState<"auto" | "hit" | "miss">("auto");
+  const [damageOverride, setDamageOverride] = useState("");
+  const [correctionAmount, setCorrectionAmount] = useState("");
+  const [correctionDecision, setCorrectionDecision] = useState<"" | "auto" | "hit" | "miss">("");
+  const [correctionReason, setCorrectionReason] = useState("");
+  const pendingCorrection = useRef<{ key: string; id: string } | null>(null);
   const [mode, setMode] = useState("normal");
   const [bonus, setBonus] = useState(0);
   const [reason, setReason] = useState("");
@@ -63,14 +89,16 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
   const [status, setStatus] = useState("");
   const [opened, setOpened] = useState(false);
   const [targetConfirmed, setTargetConfirmed] = useState(false);
-  const editable = actors.filter(
-    (a) =>
-      (isManagerRole(role) || a.ownerUserId === user?.id) &&
-      (!message.targetMode || message.targetActorIds?.includes(a.id)),
+  const { editable, fixedTargets, mapTargets } = resolutionTargets(
+    actors,
+    role,
+    user?.id,
+    message,
+    targetActorIds,
   );
-  const mapTargets = targetActorIds
-    .map((id) => editable.find((actor) => actor.id === id))
-    .filter((actor): actor is Actor => !!actor);
+  const selectedFromAction = fixedTargets.includes(Number(target));
+  const confirmed = selectedFromAction || targetConfirmed;
+  const correcting = hitDecision !== "auto" || factor !== "auto" || damageOverride !== "";
   const selectedTarget = editable.find((a) => String(a.id) === target);
   const path = `/scenes/${sceneId}/damage/${message.id}`;
 
@@ -93,7 +121,7 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
     return () => {
       active = false;
     };
-  }, [target, opened, path, setError]);
+  }, [target, opened, path, setError, lastChatId]);
 
   useEffect(() => {
     if (!opened || target || !mapTargets.length) return;
@@ -112,14 +140,48 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
       if (response.actor) upsertActor(response.actor);
       setResult(await api<TargetResult>(`${path}?actorId=${target}`));
       setStatus(success);
+      return true;
     } catch (error) {
       setError(error instanceof Error ? error.message : "Não foi possível resolver a ação.");
+      return false;
     } finally {
       setBusy(false);
     }
   }
+  async function correctApplied() {
+    if (
+      !applied ||
+      applied.undone ||
+      !isManagerRole(role) ||
+      correctionAmount === "" ||
+      !correctionReason.trim()
+    )
+      return;
+    const decision = correctionDecision || applied.resolution.hitDecision || "auto";
+    const key = `${sceneId}:${message.id}:${target}:${correctionAmount}:${decision}:${correctionReason.trim()}`;
+    if (pendingCorrection.current?.key !== key)
+      pendingCorrection.current = { key, id: crypto.randomUUID() };
+    if (
+      await execute(
+        "",
+        {
+          correct: true,
+          requestId: pendingCorrection.current.id,
+          damageOverride: Number(correctionAmount),
+          hitDecision: decision,
+          reason: correctionReason.trim(),
+        },
+        "Correção registrada sem refazer a rolagem.",
+      )
+    ) {
+      pendingCorrection.current = null;
+      setCorrectionAmount("");
+      setCorrectionReason("");
+      setCorrectionDecision("");
+    }
+  }
   const applied = result?.application;
-  const disabled = busy || loading || !result || result.actionUndone || !targetConfirmed;
+  const disabled = busy || loading || !result || result.actionUndone || !confirmed;
   const concentration = applied?.resolution;
   const saveControls = (
     <div className="resolution-fields">
@@ -175,7 +237,7 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
         </label>
         {!!mapTargets.length && (
           <div className="resolution-fields">
-            <span>Alvos escolhidos no mapa:</span>
+            <span>{fixedTargets.length ? "Alvos desta ação:" : "Alvos escolhidos no mapa:"}</span>
             {mapTargets.map((actor) => (
               <button
                 type="button"
@@ -194,7 +256,7 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
             ))}
           </div>
         )}
-        {selectedTarget && (
+        {selectedTarget && !selectedFromAction && (
           <label>
             <input
               type="checkbox"
@@ -336,7 +398,14 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
             )}
             <label>
               Aplicação
-              <select value={factor} onChange={(e) => setFactor(e.target.value)}>
+              <select
+                value={factor}
+                disabled={!isManagerRole(role)}
+                onChange={(e) => {
+                  setFactor(e.target.value);
+                  setDamageOverride("");
+                }}
+              >
                 <option value="auto">Usar regras da ficha</option>
                 <option value="1">Manual: dano rolado integral</option>
                 <option value="0.5">Manual: metade do dano rolado</option>
@@ -344,10 +413,45 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
                 <option value="0">Manual: nenhum dano</option>
               </select>
             </label>
-            {factor !== "auto" && (
+            {isManagerRole(role) && result.preview.attack && (
+              <label>
+                Decisão sobre o acerto
+                <select
+                  value={hitDecision}
+                  onChange={(e) => setHitDecision(e.target.value as "auto" | "hit" | "miss")}
+                >
+                  <option value="auto">Usar acerto calculado pelo servidor</option>
+                  <option value="hit">Registrar acerto por decisão do mestre</option>
+                  <option value="miss">Registrar erro por decisão do mestre</option>
+                </select>
+              </label>
+            )}
+            {isManagerRole(role) && message.rolls?.some((roll) => roll.kind === "damage") && (
+              <label>
+                Dano exato corrigido (opcional)
+                <input
+                  type="number"
+                  min={0}
+                  max={100000}
+                  value={damageOverride}
+                  onChange={(e) => {
+                    setDamageOverride(e.target.value);
+                    if (e.target.value !== "") setFactor("auto");
+                  }}
+                  placeholder="Ex.: 7, ou 0 para ignorar dano"
+                />
+              </label>
+            )}
+            {correcting && (
               <label>
                 Motivo da decisão
-                <input maxLength={240} value={reason} onChange={(e) => setReason(e.target.value)} />
+                <input
+                  required
+                  maxLength={240}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Cobertura, resistência ou decisão da mesa"
+                />
               </label>
             )}
             <small>
@@ -355,11 +459,25 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
               multiplicadores.
             </small>
             <button
-              disabled={disabled || (factor === "auto" && result.preview.pendingSave)}
+              disabled={
+                disabled ||
+                (factor === "auto" && damageOverride === "" && result.preview.pendingSave) ||
+                (correcting && !reason.trim()) ||
+                (hitDecision === "miss" && damageOverride !== "" && Number(damageOverride) > 0)
+              }
               onClick={() =>
                 void execute(
                   "",
-                  factor === "auto" ? {} : { factor, reason },
+                  correcting
+                    ? {
+                        ...(factor !== "auto" ? { factor } : {}),
+                        ...(damageOverride !== ""
+                          ? { damageOverride: Number(damageOverride) }
+                          : {}),
+                        ...(hitDecision !== "auto" ? { hitDecision } : {}),
+                        reason: reason.trim(),
+                      }
+                    : {},
                   `Resolução confirmada para ${selectedTarget?.name ?? "alvo"}.`,
                 )
               }
@@ -384,8 +502,81 @@ export function DamageApplication({ message }: { message: ChatMessage }) {
               <small key={index}>{step}</small>
             ))}
             {applied.resolution.reason && <small>Decisão: {applied.resolution.reason}</small>}
+            {applied.resolution.corrections?.map((correction) => (
+              <small key={correction.requestId}>
+                Correção auditada: {correction.previousDamage} → {correction.damage} PV ·{" "}
+                {correction.reason}
+              </small>
+            ))}
+            {applied.resolution.attack && (
+              <small>
+                Acerto: {applied.resolution.attack.hit ? "sim" : "não"} · rolagem original{" "}
+                {applied.resolution.attack.total}
+                {applied.resolution.hitDecision !== "auto" ? " · decisão manual do mestre" : ""}
+              </small>
+            )}
             {!applied.undone && (
               <>
+                {isManagerRole(role) && message.rolls?.some((roll) => roll.kind === "damage") && (
+                  <details>
+                    <summary>Corrigir dano já confirmado</summary>
+                    <small>
+                      A correção parte dos PV anteriores à ação e preserva as rolagens. Efeitos,
+                      salvaguardas e concentração exigem revisão separada.
+                    </small>
+                    <label>
+                      Novo dano exato
+                      <input
+                        type="number"
+                        min={0}
+                        max={100000}
+                        value={correctionAmount}
+                        onChange={(e) => setCorrectionAmount(e.target.value)}
+                        placeholder="0 para ignorar o dano"
+                      />
+                    </label>
+                    {applied.resolution.attack && (
+                      <label>
+                        Decisão sobre o acerto
+                        <select
+                          value={correctionDecision || applied.resolution.hitDecision || "auto"}
+                          onChange={(e) =>
+                            setCorrectionDecision(e.target.value as "auto" | "hit" | "miss")
+                          }
+                        >
+                          <option value="auto">Acerto calculado originalmente</option>
+                          <option value="hit">Acerto decidido pelo mestre</option>
+                          <option value="miss">Erro decidido pelo mestre</option>
+                        </select>
+                      </label>
+                    )}
+                    <label>
+                      Motivo obrigatório
+                      <input
+                        value={correctionReason}
+                        maxLength={240}
+                        onChange={(e) => setCorrectionReason(e.target.value)}
+                        placeholder="Revisão da decisão ou do dano"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={
+                        disabled ||
+                        correctionAmount === "" ||
+                        !Number.isInteger(Number(correctionAmount)) ||
+                        Number(correctionAmount) < 0 ||
+                        Number(correctionAmount) > 100000 ||
+                        !correctionReason.trim() ||
+                        ((correctionDecision || applied.resolution.hitDecision) === "miss" &&
+                          Number(correctionAmount) > 0)
+                      }
+                      onClick={() => void correctApplied()}
+                    >
+                      Confirmar correção auditada
+                    </button>
+                  </details>
+                )}
                 {concentration?.concentrationSave ? (
                   <SaveOutcome result={concentration.concentrationSave} />
                 ) : (
