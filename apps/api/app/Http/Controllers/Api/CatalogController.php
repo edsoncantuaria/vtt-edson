@@ -34,6 +34,8 @@ class CatalogController extends Controller
             'source' => ['nullable', 'string', 'max:80'], 'level' => ['nullable', 'integer', 'min:0', 'max:20'],
             'id' => ['nullable', 'integer', 'min:1'],
             'classId' => ['nullable', 'integer', 'min:1'],
+            'raceName' => ['nullable', 'string', 'max:120'],
+            'raceSource' => ['nullable', 'string', 'max:80'],
             'school' => ['nullable', 'in:A,C,D,E,V,I,N,T'],
             'ritual' => ['nullable', 'boolean'],
             'maxLevel' => ['nullable', 'integer', 'between:0,9'],
@@ -49,6 +51,15 @@ class CatalogController extends Controller
             $base->whereIn('id', $materializedIds ?: [0]);
         } elseif ($scope === 'homebrew') {
             $base->whereRaw('1 = 0');
+        }
+        if ($kind === 'races') {
+            if (isset($data['raceName'])) {
+                $base->where('data->raw->raceName', $data['raceName'])
+                    ->when($data['raceSource'] ?? null, fn ($q, $source) => $q->where(fn ($q) => $q
+                        ->where('data->raw->raceSource', $source)->orWhereNull('data->raw->raceSource')));
+            } else {
+                $base->whereNull('data->raw->raceName');
+            }
         }
         if (! ($data['includeInactive'] ?? false)) {
             $base->where('active', true);

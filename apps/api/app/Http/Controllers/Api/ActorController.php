@@ -9,6 +9,7 @@ use App\Models\CampaignResourcePermission;
 use App\Support\Dnd\ActorDocumentService;
 use App\Support\Dnd\ActorStateFactory;
 use App\Support\Dnd\ActorSystemValidator;
+use App\Support\Dnd\WizardCreationValidator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,7 @@ class ActorController extends Controller
     public function __construct(
         private readonly ActorSystemValidator $systemValidator,
         private readonly ActorDocumentService $documents,
+        private readonly WizardCreationValidator $wizard,
     ) {}
 
     public function index(Request $request, Campaign $campaign): JsonResponse
@@ -65,6 +67,9 @@ class ActorController extends Controller
 
         $this->systemValidator->validate($request);
         $system = $data['system'] ?? ($data['type'] === 'monster' ? ActorStateFactory::monster() : ActorStateFactory::character());
+        if ($data['type'] === 'character') {
+            $this->wizard->validate($request, $campaign, $system);
+        }
 
         $actor = Actor::create([
             'campaign_id' => $campaign->id,

@@ -62,6 +62,11 @@ export type FiveToolsRaw = Record<string, unknown> & {
   preparedSpellsProgression?: number[];
   proficiency?: string[];
   skillProficiencies?: Array<Record<string, unknown>>;
+  languageProficiencies?: Array<Record<string, unknown>>;
+  toolProficiencies?: Array<Record<string, unknown>>;
+  feats?: Array<Record<string, unknown>>;
+  raceName?: string;
+  raceSource?: string;
   speed?: number | { walk?: number };
   spellcastingAbility?: Ability;
   spellsKnownProgression?: number[];

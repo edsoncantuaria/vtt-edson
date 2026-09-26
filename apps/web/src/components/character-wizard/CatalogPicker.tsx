@@ -10,6 +10,7 @@ export function CatalogPicker({
   onChange,
   classId,
   maxLevel,
+  parentRace,
 }: {
   kind: CatalogKind;
   edition: string;
@@ -17,6 +18,7 @@ export function CatalogPicker({
   onChange: (v: CatalogEntry) => void;
   classId?: number;
   maxLevel?: number;
+  parentRace?: { name: string; source: string };
 }) {
   const campaignId = useSession((state) => state.campaignId);
   const [source, setSource] = useState("");
@@ -34,7 +36,7 @@ export function CatalogPicker({
     setResult(null);
     const timer = setTimeout(() => {
       void api<CatalogResults>(
-        `/catalog/${kind}?campaignId=${campaignId}&edition=${edition}&source=${encodeURIComponent(source)}&query=${encodeURIComponent(query)}&perPage=20&page=${page}${classId && !outsideList ? "&classId=" + classId : ""}${maxLevel !== undefined && !outsideList ? "&maxLevel=" + maxLevel : ""}${school ? "&school=" + school : ""}${ritual ? "&ritual=1" : ""}`,
+        `/catalog/${kind}?campaignId=${campaignId}&edition=${edition}&source=${encodeURIComponent(source)}&query=${encodeURIComponent(query)}&perPage=20&page=${page}${classId && !outsideList ? "&classId=" + classId : ""}${maxLevel !== undefined && !outsideList ? "&maxLevel=" + maxLevel : ""}${school ? "&school=" + school : ""}${ritual ? "&ritual=1" : ""}${parentRace ? `&raceName=${encodeURIComponent(parentRace.name)}&raceSource=${encodeURIComponent(parentRace.source)}` : ""}`,
         { signal: controller.signal },
       )
         .then(setResult)
@@ -59,6 +61,8 @@ export function CatalogPicker({
     school,
     ritual,
     outsideList,
+    parentRace?.name,
+    parentRace?.source,
   ]);
   return (
     <div className="wizard-picker">
@@ -161,7 +165,9 @@ export function CatalogPicker({
                 onClick={() => onChange(entry)}
               >
                 <b>{entry.name}</b>
-                <small>{entry.source}</small>
+                <small>
+                  {String(entry.data.sourceName ?? entry.source)} · {entry.source}
+                </small>
               </button>
             ))}
           </div>
